@@ -1,0 +1,44 @@
+// Notchfax relay server.
+// 本地开发（wrangler dev）与测试全部使用本地模拟的 D1 / R2 / Durable Object，不需要任何 Cloudflare 账号。
+// 下面的 database_id 是占位符，真实部署前要替换，见 README.md 的“部署需要什么”。
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "notchfax-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+
+  // 不记录 IP：关闭 Workers 日志与追踪，代码里也不读取 CF-Connecting-IP 等头。
+  "observability": { "enabled": false },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "notchfax",
+      // 占位符：真实部署时用 `wrangler d1 create notchfax` 返回的 id 替换
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  "r2_buckets": [
+    {
+      "binding": "IMAGES",
+      // 占位符：真实部署时用 `wrangler r2 bucket create notchfax-images` 创建同名桶（或改成你的桶名）
+      "bucket_name": "notchfax-images"
+    }
+  ],
+
+  "durable_objects": {
+    "bindings": [{ "name": "DEVICE_SOCKET", "class_name": "DeviceSocket" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DeviceSocket"] }],
+
+  // 过期清理：线路超时、图片删除（每 10 分钟一次）。本地可用 `--test-scheduled` 触发。
+  "triggers": { "crons": ["*/10 * * * *"] },
+
+  "secrets": { "required": ["SESSION_SECRET"] }
+
+  // 密钥 SESSION_SECRET 不写在这里：
+  //   本地放 .dev.vars（已被 gitignore，见 .dev.vars.example）
+  //   线上用 `wrangler secret put SESSION_SECRET`
+}

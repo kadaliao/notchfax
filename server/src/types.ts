@@ -1,0 +1,83 @@
+import type { DeviceSocket } from "./device-socket";
+
+export interface AppEnv extends Cloudflare.Env {
+  SESSION_SECRET: string;
+  DB: D1Database;
+  IMAGES: R2Bucket;
+  DEVICE_SOCKET: DurableObjectNamespace<DeviceSocket>;
+}
+
+// ---- 协议里的数据对象（见 docs/protocol.md 第 5 节）----
+
+export type LineState = "queued" | "delivered" | "connected" | "closed";
+
+export interface LineView {
+  id: string;
+  state: LineState;
+  role: "initiator" | "recipient";
+  myAlias: string;
+  peerAlias: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface MessageView {
+  id: string;
+  lineId: string;
+  from: "me" | "peer";
+  kind: "text" | "image";
+  text?: string;
+  imageId?: string;
+  width?: number;
+  height?: number;
+  sentAt: number;
+}
+
+export type ServerEvent =
+  | { type: "fax"; line: LineView; message: MessageView }
+  | { type: "line.updated"; line: LineView }
+  | { type: "ping" };
+
+// ---- D1 行 ----
+
+export interface DeviceRow {
+  id: string;
+  public_key: string;
+  created_at: number;
+  last_seen_at: number;
+  online: number;
+  suspended_until: number | null;
+  new_faxes_per_day: number;
+  quota_day: number;
+  new_faxes_used: number;
+}
+
+export interface LineRow {
+  id: string;
+  state: LineState;
+  initiator_id: string;
+  recipient_id: string | null;
+  initiator_alias: string;
+  recipient_alias: string | null;
+  created_at: number;
+  updated_at: number;
+  matched_at: number | null;
+  connected_at: number | null;
+  last_message_at: number;
+  closed_at: number | null;
+}
+
+export interface MessageRow {
+  id: string;
+  line_id: string;
+  sender_id: string;
+  kind: "text" | "image";
+  text: string | null;
+  image_id: string | null;
+  width: number | null;
+  height: number | null;
+  sent_at: number;
+  acked_at: number | null;
+  image_expires_at: number | null;
+  image_deleted: number;
+}

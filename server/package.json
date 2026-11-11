@@ -1,0 +1,23 @@
+{
+  "name": "notchfax-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Notchfax relay server (Cloudflare Workers + Durable Objects + D1 + R2)",
+  "scripts": {
+    "dev": "node scripts/ensure-dev-vars.mjs && wrangler d1 migrations apply DB --local && wrangler dev --ip 127.0.0.1 --port 8787 --test-scheduled",
+    "test": "vitest run",
+    "typecheck": "wrangler types && tsc --noEmit",
+    "types": "wrangler types",
+    "smoke": "node scripts/smoke.mjs",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "dev:reset": "rm -rf .wrangler/state"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.7.0",
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.160.0"
+  }
+}

@@ -1,0 +1,7 @@
+node_modules/
+.wrangler/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+# 由 `pnpm types`（wrangler types）生成，约 600 KB，不入库
+worker-configuration.d.ts
