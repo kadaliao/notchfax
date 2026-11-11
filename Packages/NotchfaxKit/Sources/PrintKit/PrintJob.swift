@@ -50,6 +50,14 @@ public enum Paper: String, Sendable, CaseIterable {
         }
     }
 
+    /// Print-head resolution of thermal paper: two dots per point, one per pixel on a Retina screen.
+    public static let thermalDotsPerPoint: CGFloat = 2
+
+    /// How many print-head dots fit across the content area of a default thermal sheet.
+    public static var thermalContentDots: Int {
+        Int((Paper.thermal.contentRect(in: Paper.thermal.defaultSize).width * thermalDotsPerPoint).rounded(.down))
+    }
+
     /// Height of the caption band at the bottom of a photo strip.
     public static let stripFooterHeight: CGFloat = 22
     public static let stripFrameGap: CGFloat = 4
@@ -130,7 +138,7 @@ public struct PaperSheet {
     /// The printed face as PNG data, as it would look on paper (no shadow).
     @MainActor
     public func pngData(scale: CGFloat = 3) -> Data? {
-        let rendered = PaperRenderer.render(self, size: resolvedSize(), scale: scale, seed: 1)
+        let rendered = PaperRenderer.render(self, size: resolvedSize(), scale: paper == .thermal ? Paper.thermalDotsPerPoint : scale, seed: 1)
         return PaperRenderer.pngData(rendered.printed)
     }
 }
@@ -165,7 +173,17 @@ public struct PrintJob {
         public static let detach = Interaction(rawValue: 1 << 1)
         /// Carry the sheet away from the machine as a real PNG file drag.
         public static let dragOut = Interaction(rawValue: 1 << 2)
+        // An empty set makes the sheet inert: with no actions either, clicks pass straight through it.
         public static let all: Interaction = [.grab, .detach, .dragOut]
+    }
+
+    /// How a job stands in line.
+    public enum Priority: Sendable, Equatable {
+        /// Prints in turn; a sheet already hanging is moved along to make room.
+        case normal
+        /// Something nobody asked for just now (a daily print). It waits behind every
+        /// ordinary job and never hurries a sheet that is already out.
+        case ambient
     }
 
     public var sheet: PaperSheet
@@ -180,6 +198,10 @@ public struct PrintJob {
     public var actions: [PaperAction]
     /// Called on the main actor for every event of this job.
     public var onEvent: (@MainActor (PrintEvent, PrintHandle) -> Void)?
+    public var priority: Priority
+    /// How long the sheet should stay out, untouched, before a waiting job may take its
+    /// place. `nil` uses the printer's short hand-off delay; give text the time it takes to read.
+    public var readingTime: TimeInterval?
 
     public init(
         _ sheet: PaperSheet,
@@ -189,8 +211,12 @@ public struct PrintJob {
         interaction: Interaction = .all,
         export: PNGExport? = nil,
         actions: [PaperAction] = [],
+        priority: Priority = .normal,
+        readingTime: TimeInterval? = nil,
         onEvent: (@MainActor (PrintEvent, PrintHandle) -> Void)? = nil
     ) {
+        self.priority = priority
+        self.readingTime = readingTime
         self.sheet = sheet
         self.reveal = reveal
         self.cadence = cadence
@@ -202,16 +228,30 @@ public struct PrintJob {
     }
 }
 
-/// Supplies the PNG a dragged-out sheet becomes.
+/// Names, and optionally supplies, the PNG a dragged-out sheet becomes.
 public struct PNGExport: Sendable {
     /// File name without extension.
     public var filename: String
     /// Called once, off the critical path, shortly after the sheet finishes feeding.
-    public var data: @Sendable () async throws -> Data
+    /// `nil` exports the sheet as printed, under `filename`.
+    public var data: (@Sendable () async throws -> Data)?
 
+    /// The sheet as printed, saved under a name of your choosing.
+    public init(filename: String) {
+        self.filename = filename
+        data = nil
+    }
+
+    /// A PNG produced off the main actor (a full-resolution composite, say).
     public init(filename: String, data: @escaping @Sendable () async throws -> Data) {
         self.filename = filename
         self.data = data
+    }
+
+    /// A PNG produced on the main actor, for exports that read main-actor state or render SwiftUI.
+    public init(filename: String, onMainActor data: @escaping @MainActor () async throws -> Data) {
+        self.filename = filename
+        self.data = { try await data() }
     }
 }
 

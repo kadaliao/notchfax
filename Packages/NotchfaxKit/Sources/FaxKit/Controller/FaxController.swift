@@ -75,6 +75,20 @@ final class FaxController {
         }
     }
 
+    /// Lets go of the server, before a controller for a different server takes over.
+    func stop() {
+        log("stopping")
+        composer.cancel()
+        reportPresentation?.dismiss()
+        pendingConnectNotices.values.forEach { $0.cancel() }
+        pendingConnectNotices.removeAll()
+        monitors = nil
+        let connection = connection
+        self.connection = nil
+        api = nil
+        Task { await connection?.stop() }
+    }
+
     private func pauseConnection(_ reason: ConnectionMachine.Pauses) {
         log("pause: \(reason == .sleeping ? "sleep" : "offline")")
         Task { await connection?.pause(reason) }
@@ -247,7 +261,7 @@ final class FaxController {
 
     /// The print job for a stored message, built when it reaches the front of the queue so
     /// it reflects the line as it is now.
-    func makeJob(for id: String, copy: Bool = false) -> (job: PrintJob, readingTime: TimeInterval)? {
+    func makeJob(for id: String, copy: Bool = false) -> PrintJob? {
         guard let stored = store.archive.message(id) else { return nil }
         let lineId = stored.message.lineId
         let line = store.archive.line(lineId)?.line
@@ -280,7 +294,7 @@ final class FaxController {
             isCopy: copy,
             byline: stored.isFromPeer ? nil : "我发出的"
         )
-        let sheet = model.sheet(maxPaperWidth: printer.slot.maxPaperWidth)
+        let sheet = model.sheet()
         let reveal: PrintJob.Reveal
         var cadence: FeedCadence?
         let readingTime: TimeInterval
@@ -290,9 +304,8 @@ final class FaxController {
             readingTime = min(14, 5 + Double(text.count) * 0.06)
         case .image:
             // A picture prints in fine, quick bands rather than line by line.
-            let fit = printer.slot.fittingScale(forPaperWidth: FaxType.imagePaperWidth)
             reveal = .progressive(lineHeight: 6)
-            cadence = FeedCadence(stepLength: 6 * Double(fit), stepDuration: 0.03, dwell: 0.022, variation: 0.3)
+            cadence = FeedCadence(stepLength: 6, stepDuration: 0.03, dwell: 0.022, variation: 0.3)
             readingTime = 12
         }
         let open = line?.isOpen ?? false
@@ -303,10 +316,13 @@ final class FaxController {
                 self?.replyFromPaper(lineId: lineId, handle: handle)
             })
         }
-        actions.append(PaperAction(id: "tear", title: "撕掉", systemImage: "scissors") { [weak self] handle in
-            self?.log("paper action: tear")
-            self?.tear(lineId: lineId, handle: handle, report: false)
-        })
+        if open {
+            // Hanging up closes the line for both sides. Tearing the page by hand only takes the page.
+            actions.append(PaperAction(id: "hangup", title: "挂断", systemImage: "phone.down.fill") { [weak self] handle in
+                self?.log("paper action: hang up")
+                self?.tear(lineId: lineId, handle: handle, report: false)
+            })
+        }
         if open {
             actions.append(PaperAction(id: "report", title: "举报", systemImage: "exclamationmark.bubble.fill", role: .destructive) { [weak self] handle in
                 self?.log("paper action: report")
@@ -314,15 +330,18 @@ final class FaxController {
             })
         }
         let handsOff = launch.script.handsOff
-        let job = PrintJob(
+        let stamp = FaxFormat.fileStamp(Date(unixMilliseconds: stored.message.sentAt))
+        let name = "传真 #\(line?.peerAlias ?? "····") \(stamp)"
+        return PrintJob(
             sheet,
             reveal: reveal,
             cadence: cadence,
             autoRetract: .after(max(20, readingTime + 10)),
             interaction: handsOff ? [] : .all,
-            actions: handsOff ? [] : actions
+            export: PNGExport(filename: name),
+            actions: handsOff ? [] : actions,
+            readingTime: readingTime
         )
-        return (job, readingTime)
     }
 
     /// Called once a page has come out (or failed to).
@@ -366,19 +385,12 @@ final class FaxController {
 
     /// The page goes back into the slot and a fresh sheet comes out to write on.
     func replyFromPaper(lineId: String, handle: PrintHandle?, text: String? = nil, autoSend: TimeInterval? = nil) {
+        // The page has been read; it goes back in for good and the sheet to write on comes down.
         handle?.retract()
-        Task {
-            if let handle {
-                // Wait for the page to clear the slot, but not for long.
-                for _ in 0..<12 {
-                    if case .finished = handle.state { break }
-                    try? await Task.sleep(for: .milliseconds(100))
-                }
-            }
-            composer.open(target: .line(lineId), text: text, autoSend: autoSend)
-        }
+        composer.open(target: .line(lineId), text: text, autoSend: autoSend)
     }
 
+    /// Closes a line for both sides (the protocol calls it tearing the line).
     func tear(lineId: String, handle: PrintHandle?, report: Bool) {
         handle?.tearOff()
         guard let api else { return }
@@ -395,7 +407,7 @@ final class FaxController {
                     closed?.state = .closed
                     if let closed { apply(closed, origin: .local) }
                 } else {
-                    notices.show(FaxNotice(kind: .problem, title: "没有挂断", detail: error.userMessage(for: report ? .report : .tear), key: "tear-\(lineId)"))
+                    notices.show(FaxNotice(kind: .problem, title: store.archive.line(lineId)?.line.state == .queued ? "没有撤回" : "没有挂断", detail: error.userMessage(for: report ? .report : .tear), key: "tear-\(lineId)"))
                 }
             } catch {}
         }
@@ -409,10 +421,7 @@ final class FaxController {
         reportPresentation = printer.present(options: .init(
             chrome: .machine,
             acceptsKeyboard: true,
-            onDismiss: { [weak self] in
-                self?.reportPresentation = nil
-                self?.slotDidFree()
-            }
+            onDismiss: { [weak self] in self?.reportPresentation = nil }
         )) { [weak self] presentation in
             ReportConfirmView(alias: alias) {
                 presentation.dismiss()
@@ -421,19 +430,6 @@ final class FaxController {
                 presentation.dismiss()
             }
         }
-    }
-
-    var isReportOpen: Bool { reportPresentation != nil }
-
-    /// True while something of ours hangs under the slot that a printed page would collide with.
-    var isPresentingUI: Bool {
-        composer.isOpen || reportPresentation != nil || notices.isShowing
-    }
-
-    /// Something that was holding the slot has gone: let waiting pages and notices through.
-    func slotDidFree() {
-        printQueue.pump()
-        notices.pump()
     }
 
     // MARK: Sending
@@ -523,7 +519,7 @@ final class FaxController {
 
     func menuEntries() -> [MenuEntry] {
         guard status != .notConfigured else {
-            return [.label("传真 · 未连接服务器")]
+            return [.label("传真 · 还没有设置服务器")]
         }
         var entries: [MenuEntry] = [
             .action("写传真…", systemImage: "square.and.pencil", isEnabled: canWriteNewFax) { [weak self] in
@@ -567,13 +563,16 @@ final class FaxController {
                 self?.composer.open(target: .line(lineId))
             },
             .separator,
-            .action("撕掉线路", systemImage: "scissors") { [weak self] in self?.tear(lineId: lineId, handle: nil, report: false) },
+            // A fax nobody has received yet can simply be taken back; otherwise this hangs up on the other side.
+            line.state == .queued
+                ? .action("撤回这封传真", systemImage: "arrow.uturn.backward") { [weak self] in self?.tear(lineId: lineId, handle: nil, report: false) }
+                : .action("挂断线路", systemImage: "phone.down") { [weak self] in self?.tear(lineId: lineId, handle: nil, report: false) },
         ])
     }
 
     private var statusText: String {
         switch status {
-        case .notConfigured: "传真 · 未连接服务器"
+        case .notConfigured: "传真 · 还没有设置服务器"
         case .unavailable: "传真 · 读不到这台 Mac 的传真身份"
         case .connecting: "传真 · 正在连接…"
         case .online: "传真 · 在线"

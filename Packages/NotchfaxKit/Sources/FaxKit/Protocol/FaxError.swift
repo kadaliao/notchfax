@@ -139,7 +139,7 @@ extension FaxError {
         case .notFound:
             return operation == .tear || operation == .report
                 ? "这条线路已经不在了。"
-                : "找不到这条线路，可能已经被撕掉了。"
+                : "找不到这条线路，可能已经挂断了。"
         case .internal:
             return "服务器出了点问题，稍后再试。"
         }
@@ -169,6 +169,12 @@ enum FaxFormat {
     static func headerTime(_ date: Date, calendar: Calendar = .current) -> String {
         let c = calendar.dateComponents([.month, .day, .hour, .minute], from: date)
         return String(format: "%02d-%02d %02d:%02d", c.month ?? 0, c.day ?? 0, c.hour ?? 0, c.minute ?? 0)
+    }
+
+    /// "2026-11-11 22.40", for file names.
+    static func fileStamp(_ date: Date, calendar: Calendar = .current) -> String {
+        let c = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+        return String(format: "%04d-%02d-%02d %02d.%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0, c.hour ?? 0, c.minute ?? 0)
     }
 
     /// "刚刚" / "3 分钟前" / "昨天".

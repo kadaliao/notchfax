@@ -196,8 +196,7 @@ public final class MemoriesFeature: FeatureModule {
         }
         if isAutomatic {
             dailyRun?.cancel()
-            let waits = !options.demo
-            dailyRun = Task { [weak self] in await self?.printOneAfterAnother(queue, today: now, waitForPresence: waits) }
+            dailyRun = Task { [weak self] in await self?.printOneAfterAnother(queue, today: now) }
             return
         }
 
@@ -212,10 +211,11 @@ public final class MemoriesFeature: FeatureModule {
         printer.enqueue(MemorySlip.job(.unavailable, today: now))
     }
 
-    /// The daily prints, spaced out: the next one starts once the previous sheet is gone,
-    /// so each gets its moment instead of being hurried back by the queue. The next
-    /// picture loads while the current one hangs.
-    private func printOneAfterAnother(_ picks: [MemoryCandidate], today: Date, waitForPresence: Bool) async {
+    /// The daily prints, one after another. They are ambient jobs: the printer holds
+    /// them back while the booth or a fax being written hangs from the slot, lets
+    /// anything the person asked for go first, and never hurries a sheet for them.
+    /// The next picture loads while the current one hangs.
+    private func printOneAfterAnother(_ picks: [MemoryCandidate], today: Date) async {
         var pending = picks[...]
         var loading = pending.popFirst().map(load)
         var printedAny = false
@@ -224,12 +224,8 @@ public final class MemoriesFeature: FeatureModule {
             guard let item = await current.value else { continue }
             guard !Task.isCancelled else { return }
             if printedAny { try? await Task.sleep(for: .milliseconds(700)) }
-            // Wait out the booth or a fax being written rather than hang a photo over it.
-            while waitForPresence, Presence.notReady() != nil, !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(2))
-            }
             printedAny = true
-            let outcome = await printMemory(item, today: today).outcome()
+            let outcome = await printMemory(item, today: today, priority: .ambient).outcome()
             if outcome == .cancelled { return }
         }
     }
@@ -265,7 +261,7 @@ public final class MemoriesFeature: FeatureModule {
     }
 
     @discardableResult
-    private func printMemory(_ item: MemoryPrint.Prepared, today: Date) -> PrintHandle {
+    private func printMemory(_ item: MemoryPrint.Prepared, today: Date, priority: PrintJob.Priority = .normal) -> PrintHandle {
         let day = calendar.dayKey(for: today)
         settings.recordPrinted(item.candidate.id, on: day)
         var actions: [PaperAction] = []
@@ -275,7 +271,7 @@ public final class MemoriesFeature: FeatureModule {
                 self?.request(.another)
             })
         }
-        return printer.enqueue(MemoryPrint.job(item, today: today, calendar: calendar, actions: actions))
+        return printer.enqueue(MemoryPrint.job(item, today: today, calendar: calendar, actions: actions, priority: priority))
     }
 
     private func hasAnother(than candidate: MemoryCandidate, day: String) -> Bool {
@@ -318,7 +314,7 @@ public final class MemoriesFeature: FeatureModule {
         let now = Date()
         guard settings.autoPrint else { return }
         if schedule.isDue(now: now, lastPrintedDay: settings.lastPrintedDay, calendar: calendar) {
-            if let reason = Presence.notReady() {
+            if let reason = Presence.notReady(slot: printer.activity) {
                 // Nobody to see it yet; look again shortly.
                 log.debug("Daily memory postponed: \(reason, privacy: .public)")
                 scheduleCheck(after: 30)
@@ -355,9 +351,10 @@ public final class MemoriesFeature: FeatureModule {
 enum Presence {
     /// Why not, or `nil` if the coast is clear.
     @MainActor
-    static func notReady() -> String? {
+    static func notReady(slot: SlotActivity) -> String? {
         if CGDisplayIsAsleep(CGMainDisplayID()) != 0 { return "display asleep" }
-        if isPanelOpenUnderSlot { return "a panel is open under the slot" }
+        // The booth, or a fax being written: the day's photos can wait until it is put away.
+        if slot.isPresenting { return "something is open under the slot" }
         if let session = CGSessionCopyCurrentDictionary() as? [String: Any],
            session["CGSSessionScreenIsLocked"] as? Bool == true {
             return "screen locked"
@@ -368,14 +365,5 @@ enum Presence {
         )
         if idle > 120 { return "idle for \(Int(idle)) s" }
         return nil
-    }
-
-    /// The booth or a fax being written hangs from the slot; a photo would cover it.
-    /// PrintKit has no public "is presenting" flag, so this looks for a visible panel at
-    /// the level PrintKit gives presentations (just above the status bar).
-    @MainActor
-    private static var isPanelOpenUnderSlot: Bool {
-        let level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
-        return NSApp.windows.contains { $0.isVisible && $0.level == level && $0 is NSPanel }
     }
 }

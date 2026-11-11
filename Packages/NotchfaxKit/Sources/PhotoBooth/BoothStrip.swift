@@ -64,7 +64,9 @@ public enum BoothStrip {
         return PrintJob(
             sheet,
             autoRetract: .after(18),
-            export: PNGExport(filename: name) { try await export.png() }
+            export: PNGExport(filename: name) { try await export.png() },
+            // A strip that has just been shot is not whisked away by the next thing in line.
+            readingTime: 7
         )
     }
 

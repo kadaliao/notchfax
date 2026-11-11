@@ -60,6 +60,7 @@ Ready-made content:
 
 - `PhotoPrintContent(image:date:)` — a photo with the orange dot-matrix `DateStamp` bottom-right.
 - `DateStamp(date)` / `DateStamp(text: "'98 11 11")` — the stamp on its own.
+- `ThermalBitmap(image)` — a 1-bit picture, dot for dot (see below).
 - `PhotoStripContent(frames:caption:)` — four `CGImage`s; `Paper.stripFrameRects(contentSize:)` gives the frame boxes.
 - `PaperSurface(.thermal) { ... }` — live paper for content still being edited.
 
@@ -71,13 +72,14 @@ PrintJob(
     reveal: .progressive(lineHeight: 14),   // print line by line as it feeds; default .withPaper
     cadence: nil,                           // override the motor rhythm (FeedCadence)
     autoRetract: .after(10),                // or .never
-    interaction: .all,                      // [.grab, .detach, .dragOut]
+    interaction: .all,                      // [.grab, .detach, .dragOut]; [] = inert
     export: PNGExport(filename: "那年今日 2019") { try await fullResolutionPNG() },
     actions: [
         PaperAction(id: "reply", title: "回复", systemImage: "arrowshape.turn.up.left.fill") { _ in compose() },
-        PaperAction(id: "tear", title: "撕掉", systemImage: "scissors") { $0.tearOff() },
-        PaperAction(id: "report", title: "举报", role: .destructive) { handle in report(); handle.retract() },
+        PaperAction(id: "hangup", title: "挂断", systemImage: "phone.down.fill") { $0.tearOff() },
     ],
+    priority: .normal,                      // or .ambient
+    readingTime: 8,                         // how long it stays out before a waiting job may replace it
     onEvent: { event, handle in ... }
 )
 ```
@@ -85,13 +87,33 @@ PrintJob(
 - **Reveal.** `.progressive` advances one line per motor burst and lets the ink
   darken just below the slot. Use it for fax text. The sheet hangs upright, so the
   bottom of the page comes out first.
-- **Export.** The closure runs once, right after the sheet finishes feeding, and
-  its PNG is written to a temporary file. If the user drags the sheet away before
-  it has returned, the sheet as rendered on screen is exported instead. Without an
-  `export` that is always what is exported.
+- **Export.** Three forms: `PNGExport(filename:)` exports the sheet as printed under
+  your file name; `PNGExport(filename:) { ... }` takes a `@Sendable` closure for a
+  composite made off the main actor; `PNGExport(filename:onMainActor:)` takes a
+  main-actor closure. A closure runs once, right after the sheet finishes feeding;
+  if the sheet is dragged away before it returns, the sheet as printed is exported.
 - **Actions** appear as a small bar under the sheet while the pointer is on it.
   The handler gets the `PrintHandle`; nothing happens to the sheet unless the
   handler asks (`retract()`, `tearOff()`, `cancel()`).
+- **Interaction.** With `interaction: []` and no actions the sheet is scenery: it
+  has no hit area and clicks pass through it.
+- **Priority and reading time** are described under *One thing under the slot* below.
+
+### Pre-dithered pictures on thermal paper
+
+Thermal paper is always rendered at `Paper.thermalDotsPerPoint` (2), and a default
+sheet is `Paper.thermalContentDots` (276) dots wide. `ThermalBitmap(image)` draws a
+1-bit picture at exactly one image pixel per dot, never interpolated; pure black and
+white pass through the thermal conversion as they are (only the print head's uneven
+density is added), so the dots you dithered are the dots that print. Dither at 276
+wide or less and keep the sheet at its default width.
+
+### Captions on a photo's border
+
+For `.glossyPhoto`, a bare `CGImage` gets the faint emulsion edge automatically. A
+view does not: it draws its own picture and may leave part of the content area as
+white border for a caption. Put `.photoEmulsionEdge()` on the picture itself
+(`PhotoPrintContent` already does).
 
 ### Events
 
@@ -129,13 +151,42 @@ throw, not a drop.
 While the motor is running the sheet can be swung but not removed. Catching a
 sheet that is retracting brings it back out.
 
-### Queue
+## One thing under the slot
 
-One sheet occupies the slot at a time; other jobs wait in order. When a job is
-waiting, the hanging sheet is retracted after `Printer.Configuration.handoffDelay`
-(1.4 s) without the pointer on it, even if its own policy is `.never`. A torn
-sheet frees the slot immediately. `handle.cancel()` removes a waiting job or
-fades out a visible one; `printer.cancelAll()` does both for everything.
+The printer has one policy for everything that shares the slot, so features never
+need to look at each other.
+
+- **A sheet occupies the slot** from the moment it starts feeding until it is
+  retracted, torn off or dragged away. A torn sheet frees the slot at once.
+- **Jobs wait in line**: ordinary jobs in order, then `.ambient` ones. When an
+  ordinary job is waiting, the sheet that is out is taken back once it has been out,
+  untouched, for its `readingTime` (default: `Printer.Configuration.handoffDelay`,
+  1.4 s), even if its own policy is `.never`. Hovering restarts the clock.
+- **`.ambient` jobs** are things nobody asked for just now (a daily photo, the
+  welcome slip). They wait behind every ordinary job and never displace a sheet a
+  person asked for; a waiting ambient job only moves another ambient sheet along.
+- **A presentation takes precedence over paper.** When one opens, a sheet that is out
+  is drawn back into the slot (*stowed*) and comes out again about half a second
+  after the presentation has closed, without new events. Jobs enqueued meanwhile
+  wait, and if one is waiting when the presentation closes, it prints instead of the
+  stowed sheet coming back. `Options.hangingSheet` can ask for `.retract` (gone for
+  good) or `.leave`. Retracting or tearing a stowed sheet ends it where it is.
+- **One presentation at a time.** Presenting while another is open closes the first.
+
+`printer.activity` (`SlotActivity`) says what is going on: `sheet` (`.none`,
+`.feeding`, `.hanging`, `.stowed`), `isPresenting`, `waitingJobs`, and `isIdle`.
+Optional things pick their moment with it:
+
+```swift
+// Show a notice only when nothing is out, open or waiting.
+observation = printer.observeActivity { [weak self] activity in
+    if activity.isIdle { self?.showNextNotice() }
+}
+await printer.waitUntilIdle()
+```
+
+`handle.cancel()` removes a waiting job or fades out a visible one;
+`printer.cancelAll()` does both for everything.
 
 ## Presenting a view under the slot
 
@@ -154,7 +205,10 @@ Its content starts below the notch/slot automatically. `SlotPresentation.Options
 
 - `chrome`: `.machine` (default) or `.none` (the content draws everything).
 - `acceptsKeyboard`: lets text fields take input without activating the app.
-- `dismissesOnOutsideClick`, `dismissesOnEscape` (Escape needs `acceptsKeyboard`).
+- `hangingSheet`: `.stow` (default), `.retract` or `.leave`; see *One thing under the slot*.
+- `dismissesOnOutsideClick`, `dismissesOnEscape` (Escape needs `acceptsKeyboard`). A
+  click in an open/save panel or an alert raised from the presentation is not an
+  outside click.
 - `onDismiss`: called once however it ends.
 
 The panel is sized to the content's fitting size and follows size changes.
@@ -194,6 +248,10 @@ printer.menu.addSection(id: "fax", order: 30) {
     ]
 }
 ```
+
+`.action` also takes `shortcut: MenuShortcut("b", modifiers: [.control, .option, .command])`,
+shown beside the item (it works while the menu is open; register a global hot key
+separately if it should work everywhere).
 
 The closure runs every time the menu opens, so it can reflect current state.
 Sections are ordered by `order`, then `id`, and separated automatically. The app's

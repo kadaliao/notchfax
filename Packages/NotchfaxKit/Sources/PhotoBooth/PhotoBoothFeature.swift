@@ -22,7 +22,6 @@ public final class PhotoBoothFeature: FeatureModule {
     private var presentation: SlotPresentation?
     private var model: BoothViewModel?
     private var session: BoothSession?
-    private var lastStrip: PrintHandle?
 
     private static let lookKey = "photobooth.look"
     private static let cameraPrivacy = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera")
@@ -47,7 +46,10 @@ public final class PhotoBoothFeature: FeatureModule {
         printer.menu.addSection(id: "photobooth", order: 20) { [weak self] in
             guard let self else { return [] }
             var entries: [MenuEntry] = [
-                .action("拍大头贴…", systemImage: "camera", isEnabled: self.presentation == nil) { [weak self] in self?.open() },
+                .action(
+                    "拍大头贴…", systemImage: "camera", isEnabled: self.presentation == nil,
+                    shortcut: MenuShortcut("b", modifiers: [.control, .option, .command])
+                ) { [weak self] in self?.open() },
             ]
             #if DEBUG
             entries.append(.action("拍大头贴（模拟画面）", systemImage: "hammer", isEnabled: self.presentation == nil) { [weak self] in
@@ -86,8 +88,8 @@ public final class PhotoBoothFeature: FeatureModule {
     /// prompt, if any, appears over a booth that is already there.
     func open(autoStart: Bool = false, simulated: Bool = false) {
         guard presentation == nil else { return }
-        // Our own strip from last time would hang in front of the viewfinder.
-        lastStrip?.retract()
+        // Whatever sheet is out is drawn back into the slot by the printer while the booth
+        // is open; the new strip then prints before it would come back.
 
         let model = BoothViewModel(look: look, reduceMotion: printer.reducesMotion)
         self.model = model
@@ -177,7 +179,7 @@ public final class PhotoBoothFeature: FeatureModule {
             try? await Task.sleep(for: .milliseconds(520))
             let strip = await developed
             guard let self else { return }
-            self.lastStrip = self.printer.enqueue(BoothStrip.job(strip, date: date))
+            self.printer.enqueue(BoothStrip.job(strip, date: date))
         }
     }
 }

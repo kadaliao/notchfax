@@ -2,6 +2,7 @@ import Compression
 import CoreGraphics
 import Foundation
 import ImageIO
+import PrintKit
 import Testing
 
 @testable import FaxKit
@@ -77,11 +78,11 @@ private func noise(width: Int, height: Int) -> CGImage {
 @Suite struct DitherTests {
     @Test func `a photo becomes a 1-bit grayscale PNG the server accepts`() throws {
         let result = try FaxDither.make(from: gradient(width: 1600, height: 1200))
-        #expect(result.width == 384 && result.height == 288)
+        #expect(result.width == 276 && result.height == 207)
         let bytes = [UInt8](result.png)
         // IHDR straight after the signature: width, height, bit depth 1, colour type 0.
         #expect(Array(bytes[12..<16]) == Array("IHDR".utf8))
-        #expect(Array(bytes[16..<24]) == [0, 0, 1, 0x80, 0, 0, 1, 0x20])
+        #expect(Array(bytes[16..<24]) == [0, 0, 1, 0x14, 0, 0, 0, 0xCF])
         #expect(bytes[24] == 1, "bit depth")
         #expect(bytes[25] == 0, "colour type")
         #expect(Array(bytes[26..<29]) == [0, 0, 0], "deflate, filter 0, not interlaced")
@@ -101,12 +102,12 @@ private func noise(width: Int, height: Int) -> CGImage {
 
     @Test func `the worst case still fits under 64 KB`() throws {
         let result = try FaxDither.make(from: noise(width: 384, height: 768))
-        #expect(result.width == 384 && result.height == 768)
+        #expect(result.width == 276 && result.height == 552)
         #expect(result.png.count <= 64 * 1024)
         #expect(serverAccepts(result.png).ok)
     }
 
-    @Test(arguments: [(4000, 1000, 384, 96), (300, 3000, 77, 768), (100, 100, 384, 384), (384, 768, 384, 768)])
+    @Test(arguments: [(4000, 1000, 276, 69), (300, 3000, 77, 768), (100, 100, 276, 276), (384, 768, 276, 552)])
     func `pictures fill the print width within the page limits`(input: (Int, Int, Int, Int)) {
         let size = FaxDither.targetSize(width: input.0, height: input.1)
         #expect(size.width == input.2 && size.height == input.3)
@@ -129,6 +130,21 @@ private func noise(width: Int, height: Int) -> CGImage {
     @Test func `checksums match known values`() {
         #expect(PNGEncoder.crc32(Array("IEND".utf8)) == 0xAE42_6082)
         #expect(PNGEncoder.adler32(Array("Wikipedia".utf8)) == 0x11E6_0398)
+    }
+
+    @Test func `pictures are dithered at the width of the print head`() {
+        #expect(FaxDither.printWidth == Paper.thermalContentDots)
+        #expect(FaxDither.printWidth <= FaxDither.maxWidth)
+    }
+
+    @Test func `a wider picture from another client is reduced dot for dot, a native one is left alone`() throws {
+        let native = try #require(try FaxDither.make(from: gradient(width: 800, height: 600)).bits.cgImage())
+        #expect(FaxDither.printable(native).width == 276)
+        let wide = try #require(BilevelImage(width: 384, height: 10, ink: (0..<3840).map { UInt8($0 % 2) }).cgImage())
+        let reduced = FaxDither.printable(wide)
+        #expect(reduced.width == 276)
+        let bits = try #require(BilevelImage(thresholding: reduced))
+        #expect(bits.ink.contains(0) && bits.ink.contains(1))
     }
 
     @Test func `fitting the dots to the compose sheet keeps them strictly black or white`() throws {

@@ -25,6 +25,13 @@ enum PaperRenderer {
     static let serrationPitch: CGFloat = 3.6
     static let serrationDepth: CGFloat = 2.1
 
+    /// Thermal paper is always rendered at two pixels per point, so one print-head dot is
+    /// half a point and pre-dithered bitmaps land on it exactly; photo paper gets extra
+    /// resolution for fine detail like the date stamp.
+    static func scale(for paper: Paper) -> CGFloat {
+        paper == .thermal ? Paper.thermalDotsPerPoint : 3
+    }
+
     static func render(_ sheet: PaperSheet, size: CGSize, scale: CGFloat, seed: UInt64) -> RenderedSheet {
         let paper = sheet.paper
         let pxW = max(2, Int((size.width * scale).rounded()))
@@ -46,7 +53,12 @@ enum PaperRenderer {
             if paper == .thermal {
                 thermalPrint(content, onto: stock, at: contentRect, scale: scale, seed: seed)
             } else {
-                drawContent(content, onto: stock, at: contentRect, sheetSize: size, scale: scale, framed: paper == .glossyPhoto)
+                // A bare image is the picture itself, so it gets the emulsion edge. A view lays
+                // out its own picture and captions and draws the edge where it belongs
+                // (`photoEmulsionEdge()`), or a caption on the border would end up boxed in.
+                var framed = false
+                if case .image = sheet.content { framed = paper == .glossyPhoto }
+                drawContent(content, onto: stock, at: contentRect, sheetSize: size, scale: scale, framed: framed)
             }
         }
         shade(stock, paper: paper, scale: scale)

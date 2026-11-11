@@ -12,6 +12,8 @@ struct FaxLaunchOptions: Sendable, Equatable {
     var server: URL?
     var script = FaxDebugScript()
     var renderSamplesDirectory: String?
+    /// Debug: open the server panel at launch.
+    var showsServerSettings = false
 
     init(arguments: [String]) {
         var iterator = arguments.dropFirst().makeIterator()
@@ -35,6 +37,7 @@ struct FaxLaunchOptions: Sendable, Equatable {
             case "--fax-debug-hands-off": script.handsOff = true
             case "--fax-debug-log": script.logPath = iterator.next()
             case "--fax-render-samples": renderSamplesDirectory = iterator.next()
+            case "--fax-debug-server-settings": showsServerSettings = true
             default: break
             }
         }

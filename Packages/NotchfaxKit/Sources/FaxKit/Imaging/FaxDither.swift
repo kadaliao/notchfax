@@ -52,8 +52,13 @@ struct DitheredImage: Sendable, Equatable {
 /// Turns any picture into a fax: scaled to the print head, toned for thermal paper,
 /// error-diffused to 1 bit, and encoded as a grayscale 1-bit PNG under 64 KB.
 enum FaxDither {
+    /// What the protocol accepts.
     static let maxWidth = 384
     static let maxHeight = 768
+    /// What the paper can show: the print head has this many dots across a sheet
+    /// (`Paper.thermalContentDots`). Pictures are dithered at this width, so the dots
+    /// previewed while writing are exactly the dots that print at the other end.
+    static let printWidth = 276
     static let maxBytes = 64 * 1024
 
     struct Tone: Sendable, Equatable {
@@ -63,7 +68,7 @@ enum FaxDither {
         var maxStretch: Float = 2.6
         /// Below 1 lifts the midtones; thermal dots spread, so prints run dark.
         var gamma: Float = 0.86
-        /// Unsharp mask that keeps edges legible at 384 dots.
+        /// Unsharp mask that keeps edges legible at print-head resolution.
         var sharpenAmount: Float = 0.7
         var sharpenRadius: Int = 2
     }
@@ -88,8 +93,8 @@ enum FaxDither {
     /// Fills the print width, unless that would make the picture taller than the page allows.
     static func targetSize(width: Int, height: Int) -> (width: Int, height: Int) {
         let w = Double(max(1, width)), h = Double(max(1, height))
-        let scale = min(Double(maxWidth) / w, Double(maxHeight) / h)
-        return (max(1, min(maxWidth, Int((w * scale).rounded()))), max(1, min(maxHeight, Int((h * scale).rounded()))))
+        let scale = min(Double(printWidth) / w, Double(maxHeight) / h)
+        return (max(1, min(printWidth, Int((w * scale).rounded()))), max(1, min(maxHeight, Int((h * scale).rounded()))))
     }
 
     // MARK: Steps
@@ -203,6 +208,23 @@ enum FaxDither {
             }
         }
         return BilevelImage(width: width, height: height, ink: ink)
+    }
+}
+
+extension BilevelImage {
+    /// The dots of a picture that is already black and white (a received fax).
+    init?(thresholding image: CGImage) {
+        guard let gray = FaxDither.grayscale(image, width: image.width, height: image.height) else { return nil }
+        self.init(width: image.width, height: image.height, ink: gray.map { $0 < 0.5 ? 1 : 0 })
+    }
+}
+
+extension FaxDither {
+    /// A received picture as it goes on paper: its own dots if it fits the print head,
+    /// otherwise (a wider picture from another client) reduced dot for dot, never smeared to grey.
+    static func printable(_ image: CGImage) -> CGImage {
+        guard image.width > printWidth, let bits = BilevelImage(thresholding: image) else { return image }
+        return bits.resampled(toWidth: printWidth).cgImage() ?? image
     }
 }
 

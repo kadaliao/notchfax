@@ -28,9 +28,23 @@ public enum MenuEntry {
         systemImage: String? = nil,
         isOn: Bool? = nil,
         isEnabled: Bool = true,
+        shortcut: MenuShortcut? = nil,
         handler: @escaping @MainActor () -> Void
     ) -> MenuEntry {
-        .action(MenuAction(title: title, systemImage: systemImage, isOn: isOn, isEnabled: isEnabled, handler: handler))
+        .action(MenuAction(title: title, systemImage: systemImage, isOn: isOn, isEnabled: isEnabled, shortcut: shortcut, handler: handler))
+    }
+}
+
+/// A key combination shown beside a menu item. It works while the menu is open; a
+/// feature that wants it everywhere registers its own global hot key as well.
+public struct MenuShortcut: Sendable, Equatable {
+    /// The key, lowercase (for example `"b"`).
+    public var key: String
+    public var modifiers: NSEvent.ModifierFlags
+
+    public init(_ key: String, modifiers: NSEvent.ModifierFlags = .command) {
+        self.key = key
+        self.modifiers = modifiers
     }
 }
 
@@ -40,6 +54,7 @@ public struct MenuAction {
     /// Non-nil shows a checkmark state.
     public var isOn: Bool?
     public var isEnabled: Bool
+    public var shortcut: MenuShortcut?
     public var handler: @MainActor () -> Void
 
     public init(
@@ -47,8 +62,10 @@ public struct MenuAction {
         systemImage: String? = nil,
         isOn: Bool? = nil,
         isEnabled: Bool = true,
+        shortcut: MenuShortcut? = nil,
         handler: @escaping @MainActor () -> Void
     ) {
+        self.shortcut = shortcut
         self.title = title
         self.systemImage = systemImage
         self.isOn = isOn
@@ -121,6 +138,10 @@ extension MenuEntry {
                 item.image = action.systemImage.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: nil) }
                 item.isEnabled = action.isEnabled
                 if let isOn = action.isOn { item.state = isOn ? .on : .off }
+                if let shortcut = action.shortcut {
+                    item.keyEquivalent = shortcut.key
+                    item.keyEquivalentModifierMask = shortcut.modifiers
+                }
                 return item
             }
         }

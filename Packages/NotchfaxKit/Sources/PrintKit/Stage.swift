@@ -41,6 +41,8 @@ final class Stage: NSObject, SheetHost {
     var simulatesNotch = false { didSet { if oldValue != simulatesNotch { relayout() } } }
     var onSlotFree: ((SheetController) -> Void)?
     var onGeometryChange: (() -> Void)?
+    /// A sheet changed phase; the printer re-reads what the slot is doing.
+    var onStateChange: (() -> Void)?
 
     private(set) var screen: NSScreen?
     private let slotPanel = OverlayPanel(level: 2)
@@ -216,6 +218,7 @@ final class Stage: NSObject, SheetHost {
     func sheetStateDidChange() {
         pointerDidMove()
         requestFrames()
+        onStateChange?()
     }
 
     func haptic(_ pattern: NSHapticFeedbackManager.FeedbackPattern) {

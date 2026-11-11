@@ -27,13 +27,15 @@ protocol SheetHost: AnyObject {
 final class SheetController {
     enum Phase: Equatable {
         case feeding, hanging, retracting, inserting
+        /// Drawn back into the slot to make room, and waiting there to come out again.
+        case stowing, stowed
         case tearing, freeHeld, dragSession, returning, falling
         case fadingIn
         case fadingOut(PrintOutcome?)
         case gone
     }
 
-    private enum MotorGoal { case feedOut, reposition, retract, insert }
+    private enum MotorGoal { case feedOut, reposition, retract, insert, stow }
 
     private struct Motor {
         var program: FeedProgram
@@ -103,6 +105,7 @@ final class SheetController {
     private var cutCountdown: TimeInterval?
     private var developed = 0.0
     private var isDeveloping = false
+    private var didAnnounceFeed = false
     private var glide = Spring()
     private var insertPause: TimeInterval = 0
     private var insertCompletion: (() -> Void)?
@@ -313,22 +316,34 @@ final class SheetController {
         CATransaction.commit()
     }
 
+    /// A sheet with no interaction and no actions is scenery: it never takes the mouse.
+    private var isTouchable: Bool {
+        switch phase {
+        case .gone, .dragSession, .fadingOut, .inserting, .stowing, .stowed: return false
+        default: return !job.interaction.isEmpty || !job.actions.isEmpty
+        }
+    }
+
+    /// What the slot's occupant is doing, for `Printer.activity`.
+    var slotState: SlotActivity.Sheet {
+        switch phase {
+        case .hanging where motor == nil: .hanging
+        case .stowing, .stowed: .stowed
+        case .gone: .none
+        default: slotFreed ? .none : .feeding
+        }
+    }
+
     /// Whether `point` (stage coordinates) is on the visible paper.
     func hitTest(_ point: CGPoint) -> Bool {
-        switch phase {
-        case .gone, .dragSession, .fadingOut, .inserting: return false
-        default: break
-        }
+        guard isTouchable else { return false }
         if !isFree, phase != .tearing, point.y < anchor.y { return false }
         return node.paperRect.insetBy(dx: -3, dy: -3).contains(pose.localPoint(point))
     }
 
     /// The area the pointer can reach the sheet in, in stage coordinates; nil when it cannot be touched.
     var interactiveBounds: CGRect? {
-        switch phase {
-        case .gone, .dragSession, .fadingOut, .inserting: return nil
-        default: break
-        }
+        guard isTouchable else { return nil }
         let pose = pose
         let rect = node.paperRect
         let corners = [
@@ -358,7 +373,7 @@ final class SheetController {
 
     var needsFrames: Bool {
         switch phase {
-        case .gone: return false
+        case .gone, .stowed: return false
         case .hanging:
             if motor != nil || grab != nil || cutCountdown != nil || isDeveloping || stub != nil { return true }
             return !(pull.isSettled(at: 0) && sway.isSettled(at: 0, tolerance: 0.0006, speed: 0.004)
@@ -372,8 +387,10 @@ final class SheetController {
 
     func tick(_ dt: TimeInterval) {
         switch phase {
-        case .feeding, .hanging, .retracting, .inserting:
+        case .feeding, .hanging, .retracting, .inserting, .stowing:
             tickAttached(dt)
+        case .stowed:
+            return
         case .tearing:
             tickTear(dt)
         case .freeHeld:
@@ -527,6 +544,10 @@ final class SheetController {
         case .feedOut: feedDidFinish()
         case .reposition: break
         case .retract: finish(.retracted)
+        case .stow:
+            phase = .stowed
+            node.root.isHidden = true
+            host.sheetStateDidChange()
         case .insert:
             host.sound.play(.thunk)
             finish(nil)
@@ -537,7 +558,9 @@ final class SheetController {
         phase = .hanging
         idle = 0
         isDeveloping = node.isRevealing
-        if paper.isTearable {
+        let firstTime = !didAnnounceFeed
+        didAnnounceFeed = true
+        if paper.isTearable || !firstTime {
             // The motor lets go: the sheet settles under its own weight.
             sagTarget = 1.5
             sag.velocity += 55
@@ -545,8 +568,10 @@ final class SheetController {
         } else {
             cutCountdown = 0.1
         }
-        handle?.emit(.finishedFeeding)
-        prepareExport()
+        if firstTime {
+            handle?.emit(.finishedFeeding)
+            prepareExport()
+        }
         host.sheetStateDidChange()
     }
 
@@ -560,9 +585,54 @@ final class SheetController {
 
     // MARK: Requests
 
+    /// Draws the sheet back into the slot to make room for something else. It keeps
+    /// its place and comes back out on `unstow()`.
+    func stow() {
+        guard phase == .hanging || phase == .feeding, tear == nil else { return }
+        grab = nil
+        cutCountdown = nil
+        node.finishReveal()
+        isDeveloping = false
+        sagTarget = 0
+        if host.reduceMotion || fed <= 0.5 {
+            motor = nil
+            fed = 0
+            phase = .stowed
+            node.root.isHidden = true
+        } else {
+            phase = .stowing
+            motor = Motor(program: FeedProgram(distance: max(0, fed), cadence: .retract, seed: seed), base: fed, direction: -1, goal: .stow)
+        }
+        host.sheetStateDidChange()
+    }
+
+    func unstow() {
+        guard phase == .stowed || phase == .stowing else { return }
+        node.root.isHidden = false
+        if host.reduceMotion {
+            motor = nil
+            fed = restOut
+            node.opacity = 0
+            phase = .fadingIn
+        } else {
+            phase = .feeding
+            motor = Motor(program: FeedProgram(distance: max(0, restOut - fed), cadence: .photo, seed: seed &+ 5), base: fed, direction: 1, goal: .feedOut)
+        }
+        host.sheetStateDidChange()
+    }
+
+    var isStowed: Bool { phase == .stowed || phase == .stowing }
+
     func requestRetract() {
         if phase == .tearing {
             tear?.finishesAlone = true
+            return
+        }
+        // Already inside: it simply does not come back out.
+        if phase == .stowed { return finish(.retracted) }
+        if phase == .stowing {
+            phase = .retracting
+            motor?.goal = .retract
             return
         }
         guard phase == .hanging || phase == .feeding else { return }
@@ -583,6 +653,10 @@ final class SheetController {
             tear?.finishesAlone = true
             return
         }
+        if isStowed {
+            handle?.emit(.torn)
+            return finish(.torn)
+        }
         guard phase == .hanging, motor == nil else { return }
         guard paper.isTearable else { return requestRetract() }
         grab = nil
@@ -594,6 +668,7 @@ final class SheetController {
         guard phase != .gone else { return }
         grab = nil
         motor = nil
+        if phase == .stowed { return finish(.cancelled) }
         phase = .fadingOut(.cancelled)
         host.sheetStateDidChange()
     }
@@ -629,6 +704,7 @@ final class SheetController {
     }
 
     func mouseDown(at point: CGPoint, time: TimeInterval) {
+        guard !job.interaction.isEmpty else { return }
         cursor = point
         let current = pose
         let local = current.localPoint(point)
@@ -1010,10 +1086,10 @@ final class SheetController {
     }
 
     private func prepareExport() {
-        guard let export = job.export, exportTask == nil, exportURL == nil else { return }
+        guard let export = job.export, let provider = export.data, exportTask == nil, exportURL == nil else { return }
         let id = id
         exportTask = Task { [weak self] in
-            guard let data = try? await export.data() else { return }
+            guard let data = try? await provider() else { return }
             guard let self, self.exportURL == nil else { return }
             self.exportURL = ExportStore.write(data, name: export.filename, id: id)
         }

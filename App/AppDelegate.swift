@@ -13,11 +13,15 @@ import ServiceManagement
 ///   or `pointer-report` (prints which window a click would land on around the sheet).
 /// - `--simulate-notch`: draw a notch on a display without one.
 /// - `--reduce-motion`: behave as if the system's Reduce Motion setting were on.
+/// - `--welcome`: print the first-launch slip again.
 /// - `--quit-after <seconds>`: quit on its own, for scripted runs.
 struct LaunchOptions {
     var demos: [String] = []
     var simulatesNotch = false
     var reducesMotion = false
+    var forcesWelcome = false
+    /// A run driven by debug arguments: nothing should print by itself and get in the way.
+    var isScripted = false
     var quitAfter: TimeInterval?
 
     init(arguments: [String]) {
@@ -27,10 +31,13 @@ struct LaunchOptions {
             case "--demo": demos = (iterator.next() ?? "").split(separator: ",").map(String.init)
             case "--simulate-notch": simulatesNotch = true
             case "--reduce-motion": reducesMotion = true
+            case "--welcome": forcesWelcome = true
             case "--quit-after": quitAfter = iterator.next().flatMap(TimeInterval.init)
             default: break
             }
         }
+        let scripted = ["--demo", "--fax-profile", "--memories-demo", "--photobooth-demo", "--fax-render-samples"]
+        isScripted = arguments.contains { argument in scripted.contains(argument) || argument.hasPrefix("--fax-debug") }
     }
 }
 
@@ -68,6 +75,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         installStatusItem()
         printer.start()
         features.forEach { $0.start() }
+        if WelcomeSlip.shouldPrint(launch: launch) {
+            Task {
+                // Let the slot settle on screen first; a sheet out of nowhere would be startling.
+                try? await Task.sleep(for: .milliseconds(1200))
+                printer.enqueue(WelcomeSlip.job())
+            }
+        }
         runLaunchDemos()
     }
 
@@ -80,9 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func installStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
-            let image = NSImage(systemSymbolName: "printer.fill", accessibilityDescription: "Notchfax")
-            image?.isTemplate = true
-            button.image = image
+            button.image = MenuBarGlyph.image()
         }
         let menu = NSMenu()
         menu.delegate = self

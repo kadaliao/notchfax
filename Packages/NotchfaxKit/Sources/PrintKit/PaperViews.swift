@@ -115,7 +115,43 @@ public struct PhotoPrintContent: View {
                         stamp.padding(.trailing, 4).padding(.bottom, 3)
                     }
                 }
+                .photoEmulsionEdge()
         }
+    }
+}
+
+extension View {
+    /// The faint step where a photograph's emulsion meets the paper's white border. Put
+    /// it on the picture itself when a `.glossyPhoto` sheet's content is more than the
+    /// picture (a caption on the border, say).
+    public func photoEmulsionEdge() -> some View {
+        overlay(Rectangle().strokeBorder(Color.black.opacity(0.16), lineWidth: 0.5))
+    }
+}
+
+/// A picture that is already 1-bit, for thermal paper: one image pixel per print-head
+/// dot (`Paper.thermalDotsPerPoint`), never interpolated, so the dots that were
+/// dithered are the dots that print. Pure black and white pass through the thermal
+/// conversion unchanged apart from the print head's uneven density.
+///
+/// Keep the image no wider than `Paper.thermalContentDots` on a default-width sheet.
+public struct ThermalBitmap: View {
+    private let image: CGImage
+
+    public init(_ image: CGImage) {
+        self.image = image
+    }
+
+    /// The size the bitmap takes on paper, in points.
+    public var size: CGSize {
+        CGSize(width: CGFloat(image.width) / Paper.thermalDotsPerPoint, height: CGFloat(image.height) / Paper.thermalDotsPerPoint)
+    }
+
+    public var body: some View {
+        Image(decorative: image, scale: Paper.thermalDotsPerPoint)
+            .interpolation(.none)
+            .antialiased(false)
+            .frame(width: size.width, height: size.height)
     }
 }
 

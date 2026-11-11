@@ -14,7 +14,18 @@ public final class SlotPresentation {
             case none
         }
 
+        /// What happens to a sheet that is out when the presentation opens.
+        public enum HangingSheet: Sendable {
+            /// It is drawn back into the slot and comes out again afterwards.
+            case stow
+            /// It is retracted for good.
+            case retract
+            /// It stays where it is, in front of the presentation.
+            case leave
+        }
+
         public var chrome: Chrome
+        public var hangingSheet: HangingSheet
         /// Lets the panel take keyboard input (text fields) without activating the app.
         public var acceptsKeyboard: Bool
         public var dismissesOnOutsideClick: Bool
@@ -24,12 +35,14 @@ public final class SlotPresentation {
 
         public init(
             chrome: Chrome = .machine,
+            hangingSheet: HangingSheet = .stow,
             acceptsKeyboard: Bool = false,
             dismissesOnOutsideClick: Bool = true,
             dismissesOnEscape: Bool = true,
             onDismiss: (@MainActor () -> Void)? = nil
         ) {
             self.chrome = chrome
+            self.hangingSheet = hangingSheet
             self.acceptsKeyboard = acceptsKeyboard
             self.dismissesOnOutsideClick = dismissesOnOutsideClick
             self.dismissesOnEscape = dismissesOnEscape
@@ -94,7 +107,7 @@ public final class SlotPresentation {
 
     // MARK: Internal
 
-    func show(_ content: AnyView) {
+    func show(_ content: AnyView, after delay: Duration = .zero) {
         model.chrome = options.chrome
         model.topInset = stage.geometry.mouth.maxY + (options.chrome == .machine ? 6 : 4)
         model.reduceMotion = stage.reduceMotion
@@ -115,8 +128,12 @@ public final class SlotPresentation {
             panel.orderFrontRegardless()
         }
         startMonitoring()
-        // One runloop turn so the hidden state is on screen before it animates in.
-        Task { [model] in model.isShown = true }
+        // At least one runloop turn so the hidden state is on screen before it animates in.
+        Task { [weak self, model] in
+            if delay > .zero { try? await Task.sleep(for: delay) }
+            guard self?.isPresented == true else { return }
+            model.isShown = true
+        }
     }
 
     func reposition() {
@@ -132,19 +149,31 @@ public final class SlotPresentation {
         guard options.dismissesOnOutsideClick else { return }
         let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown]
         if let global = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] _ in
-            MainActor.assumeIsolated { self?.dismiss() }
+            MainActor.assumeIsolated {
+                // An open or save panel raised from the presentation may be drawn by another
+                // process; a click inside it is not a click away.
+                if !Self.isPickerOpen { self?.dismiss() }
+            }
         }) {
             monitors.append(global)
         }
         if let local = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] event in
             MainActor.assumeIsolated {
-                // Clicks on paper or on other machine panels are part of the same surface.
-                if !(event.window is OverlayPanel) { self?.dismiss() }
+                // Clicks on paper, on other machine panels, in a file picker or in an alert are
+                // part of the same task.
+                let window = event.window
+                if !(window is OverlayPanel), !(window is NSSavePanel), NSApp.modalWindow == nil, !Self.isPickerOpen {
+                    self?.dismiss()
+                }
             }
             return event
         }) {
             monitors.append(local)
         }
+    }
+
+    private static var isPickerOpen: Bool {
+        NSApp.windows.contains { $0 is NSSavePanel && $0.isVisible }
     }
 
     private func stopMonitoring() {

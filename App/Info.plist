@@ -26,6 +26,8 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Notchfax 需要使用摄像头来拍大头贴。照片只保存在这台 Mac 上。</string>
+	<key>NSCameraUseContinuityCameraDeviceType</key>
+	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string></string>
 	<key>NSPhotoLibraryUsageDescription</key>

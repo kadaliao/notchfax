@@ -36,13 +36,6 @@ enum FaxType {
     static var contentWidth: CGFloat {
         paperWidth - Paper.thermal.contentInsets.leading - Paper.thermal.contentInsets.trailing
     }
-
-    /// Picture pages are laid out so one PNG dot is one rendered pixel (paper renders at 2x),
-    /// then scaled by the slot like any wide sheet.
-    static let imageContentWidth = CGFloat(FaxDither.maxWidth) / 2
-    static var imagePaperWidth: CGFloat {
-        imageContentWidth + Paper.thermal.contentInsets.leading + Paper.thermal.contentInsets.trailing
-    }
 }
 
 /// What goes on one printed page.
@@ -123,10 +116,8 @@ struct FaxPageView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .image(let image):
-            // Two dots per point: at the paper's 2x render scale each PNG dot is one pixel.
-            Image(decorative: image, scale: 2)
-                .interpolation(.none)
-                .frame(width: CGFloat(image.width) / 2, height: CGFloat(image.height) / 2)
+            // One PNG dot per print-head dot: nothing is rescaled or dithered again.
+            ThermalBitmap(FaxDither.printable(image))
                 .frame(maxWidth: .infinity)
         }
     }
@@ -176,24 +167,10 @@ struct LineMark: View {
 // MARK: - Building print jobs
 
 extension FaxPageModel {
-    /// The sheet for this page: text pages on standard thermal paper, picture pages wide
-    /// enough that every dot of the PNG lands on its own pixel.
+    /// The sheet for this page, on standard thermal paper; its height follows the content.
     @MainActor
-    func sheet(maxPaperWidth: CGFloat) -> PaperSheet {
-        switch body {
-        case .text:
-            return PaperSheet(.thermal) { FaxPageView(model: self) }
-        case .image:
-            // The slot scales a wide sheet down; enlarge the type to match so the header
-            // reads at the same size as on a text page.
-            let fit = min(1, maxPaperWidth / FaxType.imagePaperWidth)
-            let textPageFit = min(1, maxPaperWidth / FaxType.paperWidth)
-            let typeScale = min(1.6, max(1, textPageFit / max(0.01, fit)))
-            let view = FaxPageView(model: self, scale: typeScale)
-            let insets = Paper.thermal.contentInsets
-            let height = Self.fittedHeight(view, width: FaxType.imageContentWidth) + insets.top + insets.bottom
-            return PaperSheet(.thermal, size: CGSize(width: FaxType.imagePaperWidth, height: min(1400, height))) { view }
-        }
+    func sheet() -> PaperSheet {
+        PaperSheet(.thermal) { FaxPageView(model: self) }
     }
 
     @MainActor

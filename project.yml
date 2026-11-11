@@ -27,6 +27,7 @@ targets:
         CFBundleVersion: "1"
         LSUIElement: true
         LSApplicationCategoryType: public.app-category.utilities
+        NSCameraUseContinuityCameraDeviceType: true
         NSCameraUsageDescription: Notchfax 需要使用摄像头来拍大头贴。照片只保存在这台 Mac 上。
         NSPhotoLibraryUsageDescription: Notchfax 需要读取照片图库，为你打印“那年今日”的照片。照片不会离开这台 Mac。
         NSHumanReadableCopyright: ""
@@ -43,6 +44,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.kadaliao.notchfax
         PRODUCT_NAME: Notchfax
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: "-"
         DEVELOPMENT_TEAM: ""

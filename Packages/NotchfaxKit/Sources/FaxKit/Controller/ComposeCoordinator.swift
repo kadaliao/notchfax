@@ -15,7 +15,6 @@ final class ComposeCoordinator {
     private unowned let controller: FaxController
     private var session: (model: ComposeModel, presentation: SlotPresentation)?
     private var drafts: [ComposeTarget: Draft] = [:]
-    private var clickMonitor: Any?
 
     init(controller: FaxController) {
         self.controller = controller
@@ -72,9 +71,9 @@ final class ComposeCoordinator {
         let presentation = controller.printer.present(options: .init(
             chrome: .none,
             acceptsKeyboard: true,
-            // A sheet being written should not vanish because the picture panel took a click;
-            // clicks in other apps are watched below instead.
-            dismissesOnOutsideClick: false,
+            // Clicking away puts the sheet back (the draft is kept). PrintKit does not count
+            // clicks in the picture panel as clicks away.
+            dismissesOnOutsideClick: !controller.launch.script.handsOff,
             dismissesOnEscape: true,
             onDismiss: { [weak self, weak model] in
                 guard let self, let model else { return }
@@ -84,7 +83,6 @@ final class ComposeCoordinator {
             ComposeView(model: model, actions: actions)
         }
         session = (model, presentation)
-        installClickMonitor()
         controller.log("compose opened \(target)\(error == nil ? "" : " with error")")
         if error != nil { controller.composeDidShowError(target: target) }
         if let autoSend {
@@ -102,13 +100,8 @@ final class ComposeCoordinator {
 
     private func didClose(_ model: ComposeModel) {
         if session?.model === model { session = nil }
-        removeClickMonitor()
         if !model.isSending, model.hasContent {
             drafts[model.target] = Draft(text: model.text, image: model.image)
-        }
-        Task {
-            try? await Task.sleep(for: .milliseconds(450))
-            controller.slotDidFree()
         }
     }
 
@@ -155,7 +148,6 @@ final class ComposeCoordinator {
         }
         model.isSending = true
         session = nil
-        removeClickMonitor()
 
         let target = model.target
         let text = model.text
@@ -291,20 +283,5 @@ final class ComposeCoordinator {
     nonisolated static func prepare(_ load: @Sendable () -> CGImage?) async -> Result<DitheredImage, FaxError> {
         guard let image = load(), let dithered = try? FaxDither.make(from: image) else { return .failure(.unreadableImage) }
         return .success(dithered)
-    }
-
-    // MARK: Outside clicks
-
-    private func installClickMonitor() {
-        removeClickMonitor()
-        guard !controller.launch.script.handsOff else { return }
-        clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            MainActor.assumeIsolated { self?.cancel() }
-        }
-    }
-
-    private func removeClickMonitor() {
-        if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
-        clickMonitor = nil
     }
 }

@@ -286,10 +286,9 @@ struct ComposeSheetLayout<TextBody: View, Footer: View, ImageOverlay: View>: Vie
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .clipped()
             if let image, let sheetDots = Self.sheetDots(image), let picture = sheetDots.cgImage() {
-                // Pixel-exact at the paper's 2x: what is previewed is what goes into the slot.
-                Image(decorative: picture, scale: 2)
-                    .interpolation(.none)
-                    .frame(width: CGFloat(sheetDots.width) / 2, height: CGFloat(sheetDots.height) / 2)
+                // The very dots that will be sent, one per print-head dot: what is previewed here
+                // is what goes into the slot and what comes out at the other end.
+                ThermalBitmap(picture)
                     .overlay(alignment: .topTrailing) { imageOverlay() }
                     .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
             } else if isPreparingImage {
@@ -305,7 +304,7 @@ struct ComposeSheetLayout<TextBody: View, Footer: View, ImageOverlay: View>: Vie
 extension ComposeSheetLayout {
     /// The picture's dots fitted to the compose sheet's width at two pixels per point.
     static func sheetDots(_ image: DitheredImage) -> BilevelImage? {
-        image.bits.resampled(toWidth: Int((FaxType.contentWidth * 2).rounded(.down)))
+        image.bits.resampled(toWidth: FaxDither.printWidth)
     }
 }
 

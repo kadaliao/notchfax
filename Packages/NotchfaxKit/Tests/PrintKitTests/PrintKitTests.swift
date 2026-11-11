@@ -1,6 +1,9 @@
 import CoreGraphics
 import Foundation
+import SwiftUI
 import Testing
+
+private typealias Spring = PrintKit.Spring
 
 @testable import PrintKit
 
@@ -49,6 +52,44 @@ import Testing
         #expect(queue.pending == [2])
         #expect(queue.removeAllPending() == [2])
         #expect(queue.pending.isEmpty)
+    }
+}
+
+@Suite struct PrintQueuePolicyTests {
+    @Test func `ambient jobs wait behind ordinary ones and never hurry a sheet`() {
+        var queue = PrintQueue<Int>()
+        #expect(queue.enqueue(1) == 1)
+        #expect(queue.enqueue(2, ambient: true) == nil)
+        #expect(!queue.shouldHurryActive)
+        #expect(queue.enqueue(3) == nil)
+        #expect(queue.shouldHurryActive)
+        #expect(queue.pending == [3, 2])
+        #expect(queue.finishActive() == 3)
+        #expect(!queue.shouldHurryActive)
+        #expect(queue.finishActive() == 2)
+        #expect(queue.cancel(2) == .isActive)
+    }
+
+    @Test func `a paused queue holds new jobs until it is resumed`() {
+        var queue = PrintQueue<Int>()
+        queue.pause()
+        #expect(queue.enqueue(1) == nil)
+        #expect(queue.enqueue(2, ambient: true) == nil)
+        #expect(queue.active == nil && queue.pending == [1, 2])
+        #expect(queue.resume() == 1)
+        #expect(queue.resume() == nil)
+    }
+
+    @Test func `pausing leaves the sheet in the slot alone but stops the hand-off`() {
+        var queue = PrintQueue<Int>()
+        _ = queue.enqueue(1)
+        _ = queue.enqueue(2)
+        queue.pause()
+        #expect(queue.active == 1)
+        #expect(queue.finishActive() == nil)
+        #expect(queue.active == nil && !queue.isIdle)
+        #expect(queue.resume() == 2)
+        #expect(queue.cancel(9) == .unknown)
     }
 }
 
@@ -378,10 +419,149 @@ import Testing
         #expect(torn.phase == .gone)
     }
 
+    /// A sheet, printed and hanging, with its controller and host.
+    func hangingSheet(_ paper: Paper, interaction: PrintJob.Interaction = .all) -> (SheetController, OffscreenHost, () -> [PrintEvent]) {
+        let host = OffscreenHost(size: CGSize(width: 900, height: 700), reduceMotion: false)
+        let handle = PrintHandle()
+        let log = EventLog()
+        handle.onEvent = { event, _ in log.events.append(event) }
+        let job = PrintJob(PaperSheet(paper, size: CGSize(width: 160, height: 240)), autoRetract: .never, interaction: interaction)
+        let rendered = PaperRenderer.render(job.sheet, size: job.sheet.resolvedSize(), scale: 1, seed: 3)
+        let controller = SheetController(job: job, handle: handle, rendered: rendered, fit: 1, host: host, seed: 3)
+        host.controllers.append(controller)
+        controller.beginFeed()
+        settle(controller)
+        // Keep the handle alive for as long as the caller reads events.
+        return (controller, host, { _ = handle; _ = host; return log.events })
+    }
+
+    func settle(_ controller: SheetController, limit: TimeInterval = 10) {
+        var time = 0.0
+        while time < limit, controller.needsFrames {
+            controller.tick(1.0 / 120)
+            time += 1.0 / 120
+        }
+    }
+
+    @Test func `a stowed sheet goes into the slot, keeps its place and comes back without new events`() {
+        let (controller, _, events) = hangingSheet(.glossyPhoto)
+        #expect(controller.slotState == .hanging)
+        controller.stow()
+        #expect(controller.slotState == .stowed)
+        settle(controller)
+        #expect(controller.phase == .stowed)
+        #expect(controller.interactiveBounds == nil)
+        #expect(!controller.slotFreed)
+        controller.unstow()
+        settle(controller)
+        #expect(controller.phase == .hanging)
+        #expect(events() == [.startedFeeding, .finishedFeeding])
+    }
+
+    @Test func `retracting or tearing a stowed sheet ends it where it is`() {
+        let (first, _, firstEvents) = hangingSheet(.thermal)
+        first.stow()
+        settle(first)
+        first.requestRetract()
+        #expect(first.phase == .gone && first.slotFreed)
+        #expect(firstEvents().last == .retracted)
+
+        let (second, _, secondEvents) = hangingSheet(.thermal)
+        second.stow()
+        settle(second)
+        second.requestTearOff()
+        #expect(second.phase == .gone)
+        #expect(secondEvents().last == .torn)
+    }
+
+    @Test func `a sheet that is already retracting is not stowed`() {
+        let (controller, _, events) = hangingSheet(.glossyPhoto)
+        controller.requestRetract()
+        controller.stow()
+        settle(controller)
+        #expect(controller.phase == .gone)
+        #expect(events().last == .retracted)
+    }
+
+    @Test func `a sheet with no interaction and no actions never takes the mouse`() {
+        let (inert, host, _) = hangingSheet(.glossyPhoto, interaction: [])
+        let middle = CGPoint(x: host.geometry.anchor.x, y: host.geometry.anchor.y + 100)
+        #expect(inert.interactiveBounds == nil)
+        #expect(!inert.hitTest(middle))
+        let (live, liveHost, _) = hangingSheet(.glossyPhoto)
+        _ = liveHost
+        #expect(live.interactiveBounds != nil)
+        #expect(live.hitTest(middle))
+    }
+
     @Test func `a pointer script interpolates between its keys and holds at the ends`() {
         let script = PointerScript(keys: [.init(time: 1, x: 0, y: 0), .init(time: 2, x: 100, y: 50)], pressAt: 1, releaseAt: 2)
         #expect(script.point(at: 0) == .zero)
         #expect(script.point(at: 1.5) == CGPoint(x: 50, y: 25))
         #expect(script.point(at: 9) == CGPoint(x: 100, y: 50))
     }
+}
+
+@MainActor
+@Suite struct PaperRenderingTests {
+    /// A checkerboard of single dots, as an 8-bit grey image.
+    func checkerboard(_ side: Int) -> CGImage {
+        let pixels = (0..<side * side).map { UInt8((($0 % side) + ($0 / side)).isMultiple(of: 2) ? 0 : 255) }
+        return CGImage(
+            width: side, height: side, bitsPerComponent: 8, bitsPerPixel: 8, bytesPerRow: side,
+            space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+            provider: CGDataProvider(data: Data(pixels) as CFData)!, decode: nil, shouldInterpolate: false, intent: .defaultIntent
+        )!
+    }
+
+    @Test func `a pre-dithered bitmap prints dot for dot on thermal paper`() throws {
+        let side = 64
+        let insets = Paper.thermal.contentInsets
+        let size = CGSize(width: Paper.thermal.defaultSize.width, height: CGFloat(side) / 2 + insets.top + insets.bottom)
+        let sheet = PaperSheet(.thermal, size: size) {
+            ThermalBitmap(checkerboard(side)).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        let rendered = PaperRenderer.render(sheet, size: size, scale: PaperRenderer.scale(for: .thermal), seed: 9)
+        #expect(rendered.scale == Paper.thermalDotsPerPoint)
+        let bitmap = Bitmap(width: rendered.printed.width, height: rendered.printed.height)
+        bitmap.context.draw(rendered.printed, in: CGRect(x: 0, y: 0, width: bitmap.width, height: bitmap.height))
+        let originX = Int(insets.leading * 2), originY = Int(insets.top * 2)
+        var wrong = 0
+        for y in 0..<side {
+            for x in 0..<side {
+                let p = bitmap.pixels + (originY + y) * bitmap.rowBytes + (originX + x) * 4
+                // Ink is uneven, as from a worn print head, but a dot is always clearly darker than bare paper.
+                let isInk = p[1] < 226
+                if isInk != (x + y).isMultiple(of: 2) { wrong += 1 }
+            }
+        }
+        #expect(wrong == 0, "\(wrong) of \(side * side) dots did not land on their own pixel")
+    }
+
+    @Test func `the emulsion edge belongs to the picture, not to the whole content area`() {
+        // A view that leaves its content area empty must leave the paper blank: no box around it.
+        let size = Paper.glossyPhoto.defaultSize
+        let blank = PaperRenderer.render(PaperSheet(.glossyPhoto, size: size), size: size, scale: 2, seed: 4)
+        let empty = PaperRenderer.render(PaperSheet(.glossyPhoto, size: size) { Color.clear }, size: size, scale: 2, seed: 4)
+        let a = Bitmap(width: blank.printed.width, height: blank.printed.height)
+        a.context.draw(blank.printed, in: CGRect(x: 0, y: 0, width: a.width, height: a.height))
+        let b = Bitmap(width: empty.printed.width, height: empty.printed.height)
+        b.context.draw(empty.printed, in: CGRect(x: 0, y: 0, width: b.width, height: b.height))
+        var differing = 0
+        for i in 0..<(a.width * a.height * 4) where a.pixels[i] != b.pixels[i] { differing += 1 }
+        #expect(differing == 0)
+    }
+
+    @Test func `an export can be just a file name, or a main-actor closure`() async throws {
+        #expect(PNGExport(filename: "传真 #A3F2").data == nil)
+        let export = PNGExport(filename: "x", onMainActor: { Data([1, 2, 3]) })
+        let provider = try #require(export.data)
+        let data = try await provider()
+        #expect(data == Data([1, 2, 3]))
+    }
+}
+
+@MainActor
+final class EventLog {
+    var events: [PrintEvent] = []
 }

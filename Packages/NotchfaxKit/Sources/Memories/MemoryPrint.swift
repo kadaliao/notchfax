@@ -6,16 +6,21 @@ import UniformTypeIdentifiers
 
 /// Where things go on a memory print.
 ///
-/// A lab print: the picture inside a white border, the camera's orange dot-matrix date
-/// in one bottom corner and, opposite it, a quiet line saying how long ago it was.
+/// A lab print: the picture inside a white border with the camera's orange dot-matrix
+/// date in its corner, and under it, on a slightly deeper bottom border, a quiet line
+/// saying how long ago it was.
 public struct MemoryPrintLayout: Sendable, Equatable {
     /// Prints are cropped to between 2:3 and 3:2, like lab paper; panoramas and
     /// phone-shaped pictures are cut to the nearest print shape.
     public static let aspectRange: ClosedRange<Double> = (2.0 / 3.0)...(3.0 / 2.0)
 
+    /// Extra depth of the bottom border, where the caption is written.
+    public static let captionBand: CGFloat = 13
+
     /// Whole sheet, in points.
     public var sheetSize: CGSize
-    /// The picture, in sheet coordinates (origin top-left). It fills the content area.
+    /// The picture, in sheet coordinates (origin top-left). The content area is the
+    /// picture plus the caption band beneath it.
     public var photoRect: CGRect
     /// The picture's shape after cropping, width / height.
     public var aspect: Double
@@ -31,36 +36,51 @@ public struct MemoryPrintLayout: Sendable, Equatable {
             : CGSize(width: (long * 1.2 * aspect).rounded(), height: (long * 1.2).rounded())
         self.aspect = aspect
         photoRect = CGRect(x: insets.leading, y: insets.top, width: photo.width, height: photo.height)
-        sheetSize = CGSize(width: photo.width + insets.leading + insets.trailing, height: photo.height + insets.top + insets.bottom)
+        sheetSize = CGSize(
+            width: photo.width + insets.leading + insets.trailing,
+            height: photo.height + Self.captionBand + insets.top + insets.bottom
+        )
+    }
+
+    /// Where the caption's text box starts, in sheet coordinates: on the white border,
+    /// optically centred between the picture and the paper's edge.
+    public var captionOrigin: CGPoint {
+        CGPoint(x: photoRect.minX + 1, y: photoRect.maxY + 4)
     }
 }
 
-/// The printed picture: photo, a breath of shade along the bottom edge so the lettering
-/// reads on any picture, the caption bottom-left and the date stamp bottom-right.
+/// The printed sheet's content: the photo with the date stamp bottom-right, and the
+/// caption on the paper's white border below it.
 struct MemoryPrintContent: View {
     let image: CGImage
     let date: Date
     let caption: String
+    let layout: MemoryPrintLayout
 
     var body: some View {
-        GeometryReader { proxy in
+        let content = Paper.glossyPhoto.contentRect(in: layout.sheetSize)
+        ZStack(alignment: .topLeading) {
             Image(decorative: image, scale: 1)
                 .resizable()
                 .interpolation(.high)
                 .aspectRatio(contentMode: .fill)
-                .frame(width: proxy.size.width, height: proxy.size.height)
+                .frame(width: layout.photoRect.width, height: layout.photoRect.height)
                 .clipped()
-                .overlay(alignment: .bottom) { MemoryScrim().frame(height: proxy.size.height * MemoryScrim.coverage) }
-                .overlay(alignment: .bottomLeading) { MemoryCaption(text: caption) }
+                .overlay(alignment: .bottom) { MemoryScrim().frame(height: layout.photoRect.height * MemoryScrim.coverage) }
                 .overlay(alignment: .bottomTrailing) { MemoryStamp(date: date) }
+                .photoEmulsionEdge()
+            MemoryCaption(text: caption)
+                .offset(x: layout.captionOrigin.x - content.minX, y: layout.captionOrigin.y - content.minY)
         }
+        .frame(width: content.width, height: content.height, alignment: .topLeading)
     }
 }
 
-/// A faint shade at the bottom of the picture, like the edge of a print that caught less light.
+/// A faint shade at the bottom of the picture, like the edge of a print that caught
+/// less light; it keeps the date stamp legible on bright pictures.
 struct MemoryScrim: View {
-    nonisolated static let coverage: CGFloat = 0.34
-    nonisolated static let depth: Double = 0.26
+    nonisolated static let coverage: CGFloat = 0.28
+    nonisolated static let depth: Double = 0.2
 
     var body: some View {
         LinearGradient(
@@ -74,18 +94,16 @@ struct MemoryScrim: View {
     }
 }
 
-/// "3 年前的今天", set small and light, sitting on the stamp's baseline.
+/// "3 年前的今天", written small in soft pencil grey on the border.
 struct MemoryCaption: View {
     let text: String
 
     var body: some View {
         Text(text)
-            .font(.system(size: 6.4, weight: .medium))
-            .tracking(0.5)
-            .foregroundStyle(.white.opacity(0.92))
-            .shadow(color: .black.opacity(0.35), radius: 0.8, y: 0.3)
-            .padding(.leading, 5.5)
-            .padding(.bottom, 4)
+            .font(.system(size: 6.6, weight: .medium))
+            .tracking(0.7)
+            .foregroundStyle(Color(white: 0.42))
+            .fixedSize()
     }
 }
 
@@ -124,13 +142,14 @@ enum MemoryPrint {
         today: Date,
         calendar: MemoryCalendar,
         actions: [PaperAction],
+        priority: PrintJob.Priority = .normal,
         onEvent: (@MainActor (PrintEvent, PrintHandle) -> Void)? = nil
     ) -> PrintJob {
         let candidate = prepared.candidate
         let layout = MemoryPrintLayout(imageAspect: Double(prepared.printImage.width) / Double(max(1, prepared.printImage.height)))
         let caption = calendar.caption(for: candidate.date, today: today)
         let sheet = PaperSheet(.glossyPhoto, size: layout.sheetSize) {
-            MemoryPrintContent(image: prepared.printImage, date: candidate.date, caption: caption)
+            MemoryPrintContent(image: prepared.printImage, date: candidate.date, caption: caption, layout: layout)
         }
         let export = exportRecipe(prepared.exportImage, date: candidate.date, caption: caption, layout: layout)
         let filename = "那年今日 \(exportName(candidate.date, calendar: calendar.calendar))"
@@ -139,6 +158,8 @@ enum MemoryPrint {
             autoRetract: .after(16),
             export: PNGExport(filename: filename) { try await export.png() },
             actions: actions,
+            priority: priority,
+            readingTime: 8,
             onEvent: onEvent
         )
     }
@@ -204,10 +225,11 @@ struct MemoryExport: Sendable {
         let photo = layout.photoRect
         ImageTools.draw(image, aspectFillIn: photo, flipped: true, context: ctx)
         drawScrim(in: photo, context: ctx)
-        // The overlays were rendered with their padding, so they sit in the corners as on screen.
+        // The caption sits on the border; the stamp was rendered with its padding, so it
+        // sits in the picture's corner as on screen.
         if let caption {
             let size = CGSize(width: CGFloat(caption.width) / scale, height: CGFloat(caption.height) / scale)
-            ImageTools.draw(caption, in: CGRect(x: photo.minX, y: photo.maxY - size.height, width: size.width, height: size.height), flipped: true, context: ctx)
+            ImageTools.draw(caption, in: CGRect(origin: layout.captionOrigin, size: size), flipped: true, context: ctx)
         }
         if let stamp {
             let size = CGSize(width: CGFloat(stamp.width) / scale, height: CGFloat(stamp.height) / scale)

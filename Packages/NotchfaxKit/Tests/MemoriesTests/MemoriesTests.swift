@@ -212,9 +212,14 @@ private func photo(
         #expect(abs(MemoryPrintLayout(imageAspect: 0.3).aspect - 2.0 / 3.0) < 0.0001)
     }
 
-    @Test func pictureFillsTheContentArea() {
+    @Test func contentAreaIsThePictureAndTheCaptionBandOnTheBorder() {
         let layout = MemoryPrintLayout(imageAspect: 1.5)
-        #expect(Paper.glossyPhoto.contentRect(in: layout.sheetSize) == layout.photoRect)
+        let content = Paper.glossyPhoto.contentRect(in: layout.sheetSize)
+        #expect(content.origin == layout.photoRect.origin && content.width == layout.photoRect.width)
+        #expect(content.height == layout.photoRect.height + MemoryPrintLayout.captionBand)
+        // The caption starts below the picture, on white paper.
+        #expect(layout.captionOrigin.y > layout.photoRect.maxY)
+        #expect(layout.captionOrigin.y + 9 <= content.maxY, "the caption's text box must fit inside the content area or it is clipped")
     }
 
     @MainActor
