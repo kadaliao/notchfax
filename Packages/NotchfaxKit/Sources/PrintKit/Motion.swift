@@ -69,7 +69,7 @@ public struct Pendulum: Sendable, Equatable {
             omega += alpha * h
             angle += omega * h
         }
-        let limit = 0.6
+        let limit = 0.5
         if angle > limit { angle = limit; omega = min(omega, 0) }
         if angle < -limit { angle = -limit; omega = max(omega, 0) }
     }

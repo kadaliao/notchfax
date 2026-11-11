@@ -125,7 +125,7 @@ public final class Printer {
         let layout = job.sheet.resolvedSize()
         let rendered = PaperRenderer.render(job.sheet, size: layout, scale: renderScale(for: job.sheet.paper), seed: seed)
         let fit = stage.geometry.fittingScale(forPaperWidth: layout.width)
-        let controller = SheetController(job: job, handle: handle, rendered: rendered, fit: fit, stage: stage, seed: seed)
+        let controller = SheetController(job: job, handle: handle, rendered: rendered, fit: fit, host: stage, seed: seed)
         handle.controller = controller
         controllers[id] = controller
         stage.add(controller)
@@ -171,7 +171,7 @@ public final class Printer {
         let rendered = PaperRenderer.render(sheet, size: layout, scale: renderScale(for: sheet.paper), seed: seed)
         let fit = stage.geometry.fittingScale(forPaperWidth: layout.width)
         let job = PrintJob(sheet, autoRetract: .never, interaction: [])
-        let controller = SheetController(job: job, handle: nil, rendered: rendered, fit: fit, stage: stage, seed: seed)
+        let controller = SheetController(job: job, handle: nil, rendered: rendered, fit: fit, host: stage, seed: seed)
         stage.add(controller)
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             controller.beginInsert(gap: max(0, gap)) { continuation.resume() }
@@ -191,6 +191,31 @@ public final class Printer {
         presentations.append(presentation)
         presentation.show(AnyView(content(presentation)))
         return presentation
+    }
+
+    // MARK: Debugging
+
+    /// Scripted pointer gestures that can be played against the sheet in the slot.
+    public static let debugGestureNames = ["hover", "swing", "carry", "carry-out", "rip", "half-tear", "fling"]
+
+    /// Plays a scripted gesture through the real interaction code, as if a hand were on
+    /// the sheet. No system events are posted and the real pointer does not move.
+    /// Returns false if the name is unknown or there is no sheet to act on.
+    @discardableResult
+    public func debugPlayGesture(_ name: String) -> Bool {
+        stage.runGesture(named: name)
+    }
+
+    /// Behaves as if the system's Reduce Motion setting were on.
+    public var debugForcesReducedMotion: Bool {
+        get { stage.forcesReducedMotion }
+        set { stage.forcesReducedMotion = newValue }
+    }
+
+    /// Reports which window a click would land on at a few points on and around the
+    /// sheet in the slot, to check that only the paper itself takes the mouse.
+    public func debugPointerReport() -> String {
+        stage.pointerReport()
     }
 
     func presentationDidClose(_ presentation: SlotPresentation) {

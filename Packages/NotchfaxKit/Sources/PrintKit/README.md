@@ -106,18 +106,25 @@ for await event in handle.events {
 }
 ```
 
-`.torn` is sent at the moment of the tear; if the torn sheet is then dropped on
-another app, `.draggedOut` follows and is the outcome.
+`.torn` is sent when a tear is complete (the sheet is free of the roll); if the torn
+sheet is then dropped on another app, `.draggedOut` follows and is the outcome.
 
 ### What the user can do to a sheet
 
 | Gesture | Thermal | Photo / strip |
 |---|---|---|
-| Grab and move a little | Swings from the slot with resistance, springs back | Same |
-| Rip sideways, or pull hard | Tears at the slot (`.torn`), then falls away when released | Slips out of the slot into the hand; goes back to the slot when released |
-| Carry it well away from the slot | Becomes a real PNG file drag (`.draggedOut` if a target accepts it) | Same; if nothing accepts it, it returns to the slot |
+| Grab and move a little | Swings from the slot with resistance, bends below the hand, springs back | Same, stiffer |
+| Rip sideways, or pull hard | A tear starts at the far edge and travels across with the pointer; a stub is left under the slot and retracts. `.torn` is sent when the tear is complete | Slips out of the slot into the hand |
+| Let go part-way through a tear | Past half way it finishes by itself. Before that it hangs by what is left, and gives way after a couple of seconds | — |
+| Let go of a loose sheet (including a throw) | Flutters down and fades. Never creates a file | Drifts back to the slot and is gripped again |
+| Carry it well away from the slot **and slow down or stop** | Becomes a real PNG file drag (`.draggedOut` if a target accepts it; otherwise it falls away) | Same; if nothing accepts it, it returns to the slot |
 | Click | `.tapped` | `.tapped` |
 | Leave it alone | Retracts after `autoRetract` | Same |
+
+A file drag only begins once the pointer is outside a zone of roughly 260 pt around
+the hanging sheet and has been moving slower than about 260 pt/s for 0.18 s, the way
+a hand slows when it aims at a folder. A sheet released while still moving fast is a
+throw, not a drop.
 
 While the motor is running the sheet can be swung but not removed. Catching a
 sheet that is retracting brings it back out.
@@ -208,14 +215,27 @@ and `.tick`. `printer.isMuted` silences everything.
   (调试 → 模拟刘海, or launch with `--simulate-notch`).
 - `printer.reducesMotion` mirrors the system setting; paper then fades in and out
   instead of feeding, and torn sheets fade instead of falling.
+  `printer.debugForcesReducedMotion = true` (or `--reduce-motion`) turns that path on without touching the system setting.
 - `PrintSamples.fax()`, `.photo()`, `.strip()` are ready-made jobs;
   `PrintSamples.landscape` and `.portrait` are procedural stand-in pictures (the
   photo booth can use `portrait` as its simulated camera on a Mac without one).
-- `Gallery.render(to:)` draws every paper type offscreen through the same layer
-  tree the live stage uses. The app exposes it as `Notchfax --render-gallery <dir>`.
+- `printer.debugPlayGesture(_:)` plays a scripted pointer gesture against the sheet in
+  the slot through the real interaction code, without posting system events or moving
+  the real pointer. Names are in `Printer.debugGestureNames`: `hover` (brings up the
+  action bar), `swing`, `carry`, `carry-out`, `rip`, `half-tear`, `fling`. Also under 调试 → 模拟手势.
+- `printer.debugPointerReport()` asks the window server which window a click would
+  land on at the centre of the sheet, just beside it, below it and in the menu bar.
+- `Gallery.render(to:)` draws every paper type offscreen through the same layer tree
+  the live stage uses, and writes `motion-*.png` contact sheets: the same gestures run
+  through the real sheet controller at 120 steps per second, photographed at set times
+  with the phase and the scripted pointer marked. The app exposes it as
+  `Notchfax --render-gallery <dir>`. (Layer shadows are not drawn by
+  `CALayer.render(in:)`, so the gallery paints them itself from the same paths and radii.)
 
-App launch flags for scripted runs: `--demo fax,photo,strip,all,viewfinder,compose,compose-send`
-and `--quit-after <seconds>`.
+App launch flags for scripted runs: `--demo <steps>` where steps are sample names
+(`fax`, `photo`, `strip`, `all`, `viewfinder`, `compose`, `compose-send`), `wait:<seconds>`,
+`gesture:<name>` and `pointer-report`, run in order — for example
+`--demo fax,wait:3,gesture:rip`. Plus `--simulate-notch`, `--reduce-motion`, `--quit-after <seconds>`.
 
 ## How it is put together
 
@@ -224,16 +244,27 @@ and `--quit-after <seconds>`.
 | `Printer.swift` | Public entry point; queue coordination |
 | `PrintJob.swift` | `Paper`, `PaperSheet`, `PrintJob`, `PrintEvent`, `PrintHandle` |
 | `PrintQueue.swift`, `FeedProgram.swift`, `Motion.swift`, `SlotGeometry.swift` | Pure logic, unit-tested |
-| `PaperRenderer.swift` | Stock, thermal printing, edges, serration, shadows |
-| `SheetNode.swift` | Layer tree of one sheet |
-| `SheetController.swift` | One sheet's state machine and physics |
-| `Stage.swift` | Windows, frame clock, pointer routing, drag-out, action bar |
+| `PaperRenderer.swift` | Stock, thermal printing, edges, serration |
+| `SheetNode.swift` | Layer tree of one sheet: strips, bend, shadows |
+| `SheetController.swift` | One sheet's state machine and physics; `SheetHost` |
+| `Stage.swift` | Windows, frame clock, hit panels, drag-out, action bar |
 | `Presentation.swift` | Views anchored under the slot |
 | `Sound.swift` | Synth and playback |
 | `Menu.swift` | `FeatureModule`, menu contributions |
+| `MotionCapture.swift` | Scripted pointer gestures and the offscreen host that runs them |
 | `PaperViews.swift`, `Samples.swift`, `Gallery.swift` | Reusable content, samples, offscreen gallery |
 
-Three borderless, non-activating panels sit above the menu bar: presentations, the
-drawn slot, and a full-screen stage for paper. The stage ignores the mouse except
-while the pointer is over paper or the action bar, so everything under it stays
-clickable.
+**Paper shape.** A sheet is cut into horizontal strips about 9 pt tall, each an
+affine-mapped slice of one image. Shearing strips sideways bends the sheet in the
+plane of the screen (the free end trails the hand, then catches up); squashing them
+and widening them slightly reads as paper standing off the screen (roll curl, the
+flick of each motor step). Tilt shading and gloss are one overlay cut to the bent
+outline, and the two shadows follow the outline too, falling further and softer
+where the paper stands off more.
+
+**Windows.** Borderless, non-activating panels above the menu bar: presentations,
+the drawn slot, a full-screen stage that never takes the mouse, and one invisible
+hit panel per sheet that is kept exactly over the paper (and its action bar). The
+window server therefore routes clicks itself; nothing is polled, and everything
+outside the paper stays clickable. A click inside a tilted sheet's bounding box but
+outside the paper is swallowed.

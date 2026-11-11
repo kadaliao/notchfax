@@ -7,12 +7,17 @@ import ServiceManagement
 
 /// Command-line switches for development.
 ///
-/// - `--demo fax,photo,strip,viewfinder,compose`: run these samples right after launch.
+/// - `--demo fax,wait:3,gesture:rip,pointer-report`: run these steps in order after launch.
+///   Steps: a sample name (`fax`, `photo`, `strip`, `all`, `viewfinder`, `compose`, `compose-send`),
+///   `wait:<seconds>`, `gesture:<name>` (a scripted pointer gesture, see `Printer.debugGestureNames`),
+///   or `pointer-report` (prints which window a click would land on around the sheet).
 /// - `--simulate-notch`: draw a notch on a display without one.
+/// - `--reduce-motion`: behave as if the system's Reduce Motion setting were on.
 /// - `--quit-after <seconds>`: quit on its own, for scripted runs.
 struct LaunchOptions {
     var demos: [String] = []
     var simulatesNotch = false
+    var reducesMotion = false
     var quitAfter: TimeInterval?
 
     init(arguments: [String]) {
@@ -21,6 +26,7 @@ struct LaunchOptions {
             switch argument {
             case "--demo": demos = (iterator.next() ?? "").split(separator: ",").map(String.init)
             case "--simulate-notch": simulatesNotch = true
+            case "--reduce-motion": reducesMotion = true
             case "--quit-after": quitAfter = iterator.next().flatMap(TimeInterval.init)
             default: break
             }
@@ -50,6 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let defaults = UserDefaults.standard
         printer.isMuted = defaults.bool(forKey: Key.muted)
         printer.simulatesNotch = launch.simulatesNotch || defaults.bool(forKey: Key.simulatesNotch)
+        printer.debugForcesReducedMotion = launch.reducesMotion
 
         // Each feature registers itself here; this list is the only wiring a module needs.
         features = [
@@ -136,7 +143,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !launch.demos.isEmpty {
             Task {
                 try? await Task.sleep(for: .milliseconds(700))
-                for demo in launch.demos { debug.run(demo) }
+                for demo in launch.demos {
+                    if demo.hasPrefix("wait:"), let seconds = Double(demo.dropFirst(5)) {
+                        try? await Task.sleep(for: .seconds(seconds))
+                    } else {
+                        debug.run(demo)
+                    }
+                }
             }
         }
         if let seconds = launch.quitAfter {

@@ -23,6 +23,9 @@ final class DebugSamples {
             .label("出纸口面板"),
             .action("取景框示例", systemImage: "camera.viewfinder") { [weak self] in self?.run("viewfinder") },
             .action("写传真并送入出纸口", systemImage: "square.and.pencil") { [weak self] in self?.run("compose") },
+            .submenu(title: "模拟手势（作用于出纸口的纸）", systemImage: "hand.draw", items: Printer.debugGestureNames.map { name in
+                .action(name) { [weak self] in self?.printer.debugPlayGesture(name) }
+            }),
             .separator,
             .action("收回所有纸张", systemImage: "xmark.circle") { [weak self] in self?.printer.cancelAll() },
         ]
@@ -40,7 +43,11 @@ final class DebugSamples {
         case "viewfinder": presentViewfinder()
         case "compose": presentCompose()
         case "compose-send": presentCompose(autoSend: true)
-        default: break
+        case "pointer-report":
+            print(printer.debugPointerReport())
+            fflush(stdout)
+        default:
+            if name.hasPrefix("gesture:") { printer.debugPlayGesture(String(name.dropFirst(8))) }
         }
     }
 

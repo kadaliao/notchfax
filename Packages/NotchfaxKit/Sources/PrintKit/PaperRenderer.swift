@@ -30,8 +30,12 @@ enum PaperRenderer {
         let pxW = max(2, Int((size.width * scale).rounded()))
         let pxH = max(2, Int((size.height * scale).rounded()))
 
-        let stock = Bitmap(width: pxW, height: pxH)
-        fillStock(stock, paper: paper, scale: scale, seed: seed)
+        // Roll paper is one continuous web: the leader above the sheet is cut from the same
+        // stock, so no seam shows where a torn sheet's top meets its body.
+        let tailPx = paper == .thermal ? Int((thermalTailLength * scale).rounded()) : 0
+        let web = Bitmap(width: pxW, height: pxH + tailPx)
+        fillStock(web, paper: paper, scale: scale, seed: seed)
+        let stock = web.rows(from: tailPx, count: pxH)
 
         let blankBitmap = stock.copy()
         shade(blankBitmap, paper: paper, scale: scale)
@@ -49,9 +53,8 @@ enum PaperRenderer {
         let printed = clipped(stock, paper: paper, size: size, scale: scale)
 
         var tail: CGImage?
-        if paper == .thermal {
-            let tailBitmap = Bitmap(width: pxW, height: Int((thermalTailLength * scale).rounded()))
-            fillStock(tailBitmap, paper: paper, scale: scale, seed: seed &+ 77)
+        if tailPx > 0 {
+            let tailBitmap = web.rows(from: 0, count: tailPx)
             shade(tailBitmap, paper: paper, scale: scale, sidesOnly: true)
             tail = tailBitmap.image()
         }
@@ -342,6 +345,13 @@ final class Bitmap {
     func copy() -> Bitmap {
         let other = Bitmap(width: width, height: height)
         other.pixels.update(from: pixels, count: rowBytes * height)
+        return other
+    }
+
+    /// A new bitmap holding `count` rows starting at row `from` (0 = top).
+    func rows(from: Int, count: Int) -> Bitmap {
+        let other = Bitmap(width: width, height: count)
+        other.pixels.update(from: pixels + from * rowBytes, count: min(count, height - from) * rowBytes)
         return other
     }
 

@@ -151,6 +151,29 @@ public enum SoundSynth {
         return out
     }
 
+    /// One short snap of fibres letting go. `index` 0 is the last, slightly heavier one.
+    static func tearGrain(_ index: Int) -> [Float] {
+        let last = index == 0
+        let n = count(last ? 0.09 : 0.05)
+        var noise = Noise(state: 0x7EA2 &+ UInt64(abs(index)) &* 7919)
+        var grainSource = Noise(state: 0x9A11 &+ UInt64(abs(index)) &* 104_729)
+        var low = OnePole(), high = OnePole()
+        var grain = 1.0
+        let decay = last ? 0.028 : 0.014
+        var out = [Float](repeating: 0, count: n)
+        for i in 0..<n {
+            let t = Double(i) / sampleRate
+            let envelope = Motion.smoothstep(t / 0.002) * exp(-t / decay)
+            if (grainSource.next() + 1) / 2 < 2400 / sampleRate { grain = 1 }
+            grain *= exp(-1 / (0.0006 * sampleRate))
+            let w = noise.next()
+            let bright = low.low(w, cutoff: last ? 6500 : 8500)
+            let crisp = bright - high.low(bright, cutoff: 1500)
+            out[i] = Float(crisp * envelope * (0.35 + 0.8 * grain) * (last ? 0.95 : 0.7))
+        }
+        return out
+    }
+
     static func slip() -> [Float] {
         let n = count(0.1)
         var noise = Noise(state: 0x511B)
@@ -201,6 +224,7 @@ public final class SoundPlayer {
     private var players: [AVAudioPlayerNode] = []
     private var nextPlayer = 0
     private var buffers: [SoundEffect: AVAudioPCMBuffer] = [:]
+    private var grains: [Int: AVAudioPCMBuffer] = [:]
     private var lastPlay = Date.distantPast
     private var idleCheck: Task<Void, Never>?
     private var isDisabled = false
@@ -209,24 +233,34 @@ public final class SoundPlayer {
     public init() {}
 
     public func play(_ effect: SoundEffect) {
-        guard !isMuted, !isDisabled, let format else { return }
+        guard !isMuted, !isDisabled else { return }
         let key = Self.cacheKey(effect)
-        let buffer: AVAudioPCMBuffer
-        if let cached = buffers[key] {
-            buffer = cached
-        } else {
-            let samples = SoundSynth.samples(for: key)
-            guard let made = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)),
-                  let channel = made.floatChannelData?[0] else { return }
-            made.frameLength = AVAudioFrameCount(samples.count)
-            samples.withUnsafeBufferPointer { source in
-                guard let base = source.baseAddress else { return }
-                channel.update(from: base, count: samples.count)
-            }
-            buffers[key] = made
-            buffer = made
+        if buffers[key] == nil { buffers[key] = makeBuffer(SoundSynth.samples(for: key)) }
+        if let buffer = buffers[key] { schedule(buffer) }
+    }
+
+    /// The run of small snaps a travelling tear makes. `index` 0 is the final one.
+    func playTearGrain(_ index: Int) {
+        guard !isMuted, !isDisabled else { return }
+        let slot = index == 0 ? 0 : 1 + abs(index) % 5
+        if grains[slot] == nil { grains[slot] = makeBuffer(SoundSynth.tearGrain(slot)) }
+        if let buffer = grains[slot] { schedule(buffer) }
+    }
+
+    private func makeBuffer(_ samples: [Float]) -> AVAudioPCMBuffer? {
+        guard let format,
+              let made = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)),
+              let channel = made.floatChannelData?[0] else { return nil }
+        made.frameLength = AVAudioFrameCount(samples.count)
+        samples.withUnsafeBufferPointer { source in
+            guard let base = source.baseAddress else { return }
+            channel.update(from: base, count: samples.count)
         }
-        guard startEngineIfNeeded(format: format) else { return }
+        return made
+    }
+
+    private func schedule(_ buffer: AVAudioPCMBuffer) {
+        guard let format, startEngineIfNeeded(format: format) else { return }
         let player = players[nextPlayer]
         nextPlayer = (nextPlayer + 1) % players.count
         player.volume = volume

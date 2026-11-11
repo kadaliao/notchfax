@@ -275,3 +275,113 @@ import Testing
         #expect(samples.suffix(20).allSatisfy { abs($0) < 0.08 })
     }
 }
+
+/// Sheets driven through the real controller by a scripted pointer, without any windows.
+@MainActor
+@Suite struct SheetInteractionTests {
+    struct Result {
+        var events: [PrintEvent] = []
+        var requestedFileDrag = false
+        var phase: SheetController.Phase = .gone
+        var slotFreed = false
+    }
+
+    /// Prints `paper`, waits for it to hang, plays `gesture`, then keeps simulating for `after` seconds.
+    func simulate(_ paper: Paper, gesture: String?, after: TimeInterval, reduceMotion: Bool = false) -> Result {
+        let host = OffscreenHost(size: CGSize(width: 900, height: 700), reduceMotion: reduceMotion)
+        let handle = PrintHandle()
+        var events: [PrintEvent] = []
+        handle.onEvent = { event, _ in events.append(event) }
+        let job = PrintJob(PaperSheet(paper, size: CGSize(width: 160, height: 240)), autoRetract: .never)
+        let rendered = PaperRenderer.render(job.sheet, size: job.sheet.resolvedSize(), scale: 1, seed: 3)
+        let controller = SheetController(job: job, handle: handle, rendered: rendered, fit: 1, host: host, seed: 3)
+        host.controllers.append(controller)
+        controller.beginFeed()
+        let dt = 1.0 / 120
+        var guardTime = 0.0
+        while guardTime < 10, controller.phase != .hanging || controller.needsFrames {
+            controller.tick(dt)
+            guardTime += dt
+        }
+        var run = gesture.flatMap { PointerScript.library[$0] }.map {
+            PointerScript.Run(script: $0(controller.node.size.height), anchor: host.geometry.anchor)
+        }
+        var time = 0.0, housekeeping = 0.0
+        while time < after {
+            if run != nil, run?.advance(dt, on: controller) == true { run = nil }
+            if controller.needsFrames { controller.tick(dt) }
+            housekeeping += dt
+            if housekeeping >= 0.25 {
+                housekeeping = 0
+                controller.housekeeping(0.25)
+            }
+            time += dt
+        }
+        return Result(events: events, requestedFileDrag: host.dragSessionRequested, phase: controller.phase, slotFreed: controller.slotFreed)
+    }
+
+    @Test func `a printed sheet feeds out and comes to rest hanging`() {
+        let result = simulate(.thermal, gesture: nil, after: 0.5)
+        #expect(result.events == [.startedFeeding, .finishedFeeding])
+        #expect(result.phase == .hanging)
+        #expect(!result.slotFreed)
+    }
+
+    @Test func `swinging a sheet neither removes it nor counts as a tap`() {
+        let result = simulate(.photoStrip, gesture: "swing", after: 3)
+        #expect(result.events == [.startedFeeding, .finishedFeeding])
+        #expect(result.phase == .hanging)
+    }
+
+    @Test func `ripping thermal paper tears it, frees the slot and lets it fall away`() {
+        let result = simulate(.thermal, gesture: "rip", after: 2.5)
+        #expect(result.events == [.startedFeeding, .finishedFeeding, .torn])
+        #expect(result.phase == .gone)
+        #expect(result.slotFreed)
+        #expect(!result.requestedFileDrag)
+    }
+
+    @Test func `a flung sheet never becomes a file drag`() {
+        let result = simulate(.thermal, gesture: "fling", after: 2.5)
+        #expect(result.events.contains(.torn))
+        #expect(!result.requestedFileDrag)
+        #expect(result.phase == .gone)
+    }
+
+    @Test func `a half-torn sheet hangs on, then gives way on its own`() {
+        let early = simulate(.thermal, gesture: "half-tear", after: 1.6)
+        #expect(early.phase == .tearing)
+        #expect(!early.events.contains(.torn))
+        let late = simulate(.thermal, gesture: "half-tear", after: 6)
+        #expect(late.events.contains(.torn))
+        #expect(late.phase == .gone)
+    }
+
+    @Test func `cut paper pulled free and let go returns to the slot`() {
+        let result = simulate(.glossyPhoto, gesture: "carry", after: 3.5)
+        #expect(result.events == [.startedFeeding, .finishedFeeding])
+        #expect(result.phase == .hanging)
+        #expect(!result.requestedFileDrag)
+        #expect(!result.slotFreed)
+    }
+
+    @Test func `carrying a sheet far away and holding it still starts a file drag`() {
+        let result = simulate(.glossyPhoto, gesture: "carry-out", after: 2)
+        #expect(result.requestedFileDrag)
+    }
+
+    @Test func `with reduced motion a sheet fades in and a tear fades out`() {
+        let shown = simulate(.thermal, gesture: nil, after: 0.2, reduceMotion: true)
+        #expect(shown.events == [.startedFeeding, .finishedFeeding])
+        let torn = simulate(.thermal, gesture: "rip", after: 1.5, reduceMotion: true)
+        #expect(torn.events.contains(.torn))
+        #expect(torn.phase == .gone)
+    }
+
+    @Test func `a pointer script interpolates between its keys and holds at the ends`() {
+        let script = PointerScript(keys: [.init(time: 1, x: 0, y: 0), .init(time: 2, x: 100, y: 50)], pressAt: 1, releaseAt: 2)
+        #expect(script.point(at: 0) == .zero)
+        #expect(script.point(at: 1.5) == CGPoint(x: 50, y: 25))
+        #expect(script.point(at: 9) == CGPoint(x: 100, y: 50))
+    }
+}
