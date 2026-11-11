@@ -14,12 +14,14 @@ import ServiceManagement
 /// - `--simulate-notch`: draw a notch on a display without one.
 /// - `--reduce-motion`: behave as if the system's Reduce Motion setting were on.
 /// - `--welcome`: print the first-launch slip again.
+/// - `--request-permissions`: ask for photo-library and camera access again if still undecided.
 /// - `--quit-after <seconds>`: quit on its own, for scripted runs.
 struct LaunchOptions {
     var demos: [String] = []
     var simulatesNotch = false
     var reducesMotion = false
     var forcesWelcome = false
+    var requestsPermissions = false
     /// A run driven by debug arguments: nothing should print by itself and get in the way.
     var isScripted = false
     var quitAfter: TimeInterval?
@@ -32,6 +34,7 @@ struct LaunchOptions {
             case "--simulate-notch": simulatesNotch = true
             case "--reduce-motion": reducesMotion = true
             case "--welcome": forcesWelcome = true
+            case "--request-permissions": requestsPermissions = true
             case "--quit-after": quitAfter = iterator.next().flatMap(TimeInterval.init)
             default: break
             }
@@ -75,6 +78,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         installStatusItem()
         printer.start()
         features.forEach { $0.start() }
+        if Permissions.shouldRequest(launch: launch) {
+            Task {
+                await Permissions.requestAll()
+                NSLog("Notchfax permissions: %@", Permissions.summary)
+            }
+        }
         if WelcomeSlip.shouldPrint(launch: launch) {
             Task {
                 // Let the slot settle on screen first; a sheet out of nowhere would be startling.
