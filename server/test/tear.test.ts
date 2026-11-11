@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { connectedPair, Device } from "./helpers";
+import { connectedPair, Device, insertLine } from "./helpers";
 
 const DAY = 24 * 3600_000;
 
@@ -156,11 +156,7 @@ describe("reports", () => {
       .run();
     for (const [i, reporter] of reporters.slice(1).entries()) {
       const lineId = `l-${i}`;
-      const now = Date.now();
-      await env.DB.prepare(
-        `INSERT INTO lines (id, state, initiator_id, recipient_id, initiator_alias, recipient_alias, created_at, updated_at, matched_at, last_message_at)
-         VALUES (?1, 'connected', ?2, ?3, '1111', '2222', ?4, ?4, ?4, ?4)`,
-      ).bind(lineId, bad.id, reporter.id, now).run();
+      await insertLine({ id: lineId, state: "connected", initiator: bad.id, recipient: reporter.id });
       await reporter.tear(lineId, true);
     }
     // 7 天内只有 2 个不同设备举报
@@ -172,10 +168,7 @@ describe("reports", () => {
     const reporter = await Device.create();
     const now = Date.now();
     for (let i = 0; i < 4; i++) {
-      await env.DB.prepare(
-        `INSERT INTO lines (id, state, initiator_id, recipient_id, initiator_alias, recipient_alias, created_at, updated_at, matched_at, last_message_at)
-         VALUES (?1, 'connected', ?2, ?3, '1111', '2222', ?4, ?4, ?4, ?4)`,
-      ).bind(`s-${i}`, bad.id, reporter.id, now).run();
+      await insertLine({ id: `s-${i}`, state: "connected", initiator: bad.id, recipient: reporter.id, now });
       await reporter.tear(`s-${i}`, true);
     }
     expect((await bad.me()).body.suspendedUntil).toBeNull();
@@ -186,10 +179,7 @@ describe("reports", () => {
     const reporters = [await Device.create(), await Device.create(), await Device.create()];
     const now = Date.now();
     for (const [i, reporter] of reporters.entries()) {
-      await env.DB.prepare(
-        `INSERT INTO lines (id, state, initiator_id, recipient_id, initiator_alias, recipient_alias, created_at, updated_at, matched_at, last_message_at)
-         VALUES (?1, 'connected', ?2, ?3, '1111', '2222', ?4, ?4, ?4, ?4)`,
-      ).bind(`p-${i}`, bad.id, reporter.id, now - 3 * DAY).run();
+      await insertLine({ id: `p-${i}`, state: "connected", initiator: bad.id, recipient: reporter.id, now: now - 3 * DAY });
       await reporter.tear(`p-${i}`, true);
     }
     expect((await bad.me()).body.suspendedUntil).not.toBeNull();

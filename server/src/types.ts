@@ -3,7 +3,6 @@ import type { DeviceSocket } from "./device-socket";
 export interface AppEnv extends Cloudflare.Env {
   SESSION_SECRET: string;
   DB: D1Database;
-  IMAGES: R2Bucket;
   DEVICE_SOCKET: DurableObjectNamespace<DeviceSocket>;
 }
 
@@ -33,10 +32,10 @@ export interface MessageView {
   sentAt: number;
 }
 
+/** 服务器主动推送的帧。心跳的 pong 由 Durable Object 的 auto-response 直接回复，不经过这里。 */
 export type ServerEvent =
   | { type: "fax"; line: LineView; message: MessageView }
-  | { type: "line.updated"; line: LineView }
-  | { type: "ping" };
+  | { type: "line.updated"; line: LineView };
 
 // ---- D1 行 ----
 
@@ -50,6 +49,9 @@ export interface DeviceRow {
   new_faxes_per_day: number;
   quota_day: number;
   new_faxes_used: number;
+  rnd: number | null;
+  recv_day: number;
+  recv_count: number;
 }
 
 export interface LineRow {
@@ -62,15 +64,21 @@ export interface LineRow {
   created_at: number;
   updated_at: number;
   matched_at: number | null;
-  connected_at: number | null;
-  last_message_at: number;
   closed_at: number | null;
+  /** 未关闭：下一个超时时间点；已关闭：清理时间点。 */
+  expires_at: number;
+}
+
+/** 带对端在线标记的线路行（读线路时顺带取，用来决定要不要去叫醒对方的 Durable Object）。 */
+export interface LineWithPresence extends LineRow {
+  peer_online: number | null;
 }
 
 export interface MessageRow {
   id: string;
   line_id: string;
   sender_id: string;
+  to_id: string | null;
   kind: "text" | "image";
   text: string | null;
   image_id: string | null;
@@ -79,5 +87,4 @@ export interface MessageRow {
   sent_at: number;
   acked_at: number | null;
   image_expires_at: number | null;
-  image_deleted: number;
 }

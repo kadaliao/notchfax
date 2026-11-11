@@ -103,7 +103,10 @@ describe("POST /v1/session", () => {
     // devices 表里只有公钥、时间戳和计数器
     const cols = await env.DB.prepare("PRAGMA table_info(devices)").all<{ name: string }>();
     expect(cols.results.map((c) => c.name).sort()).toEqual(
-      ["created_at", "id", "last_seen_at", "new_faxes_per_day", "new_faxes_used", "online", "public_key", "quota_day", "suspended_until"].sort(),
+      [
+        "created_at", "id", "last_seen_at", "new_faxes_per_day", "new_faxes_used", "online",
+        "public_key", "quota_day", "recv_count", "recv_day", "rnd", "suspended_until",
+      ].sort(),
     );
   });
 

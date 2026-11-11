@@ -81,45 +81,67 @@ async function login(label) {
   return { label, token: res.json.token, deviceId: res.json.deviceId, id };
 }
 
-/** 一个带事件收集的 WebSocket 连接。 */
+/**
+ * 一个带事件收集的 WebSocket 连接。
+ * 心跳由客户端发起：发送逐字节固定的文本帧 {"type":"ping"}，服务器回 {"type":"pong"}（见 docs/protocol.md §4）。
+ */
+const PING_FRAME = '{"type":"ping"}';
+const PONG_FRAME = '{"type":"pong"}';
+
 function connectSocket(token) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`${WS_BASE}/v1/socket?token=${encodeURIComponent(token)}`);
-    const events = [];
+    const events = []; // 解析后的 JSON 帧（不含 pong）
+    const frames = []; // 所有原始文本帧
+    let closed = null;
     const waiters = [];
     ws.addEventListener("message", (ev) => {
-      let msg;
+      frames.push(String(ev.data));
       try {
-        msg = JSON.parse(ev.data);
+        const msg = JSON.parse(ev.data);
+        if (msg.type !== "pong") events.push(msg);
       } catch {
-        return;
+        // 非 JSON 帧忽略
       }
-      events.push(msg);
-      if (msg.type === "ping") ws.send(JSON.stringify({ type: "pong" }));
       for (const w of [...waiters]) w();
     });
+    ws.addEventListener("close", (ev) => {
+      closed = { code: ev.code, reason: ev.reason };
+      for (const w of [...waiters]) w();
+    });
+    const waitUntil = (test, timeoutMs, describe) =>
+      new Promise((res, rej) => {
+        const poll = () => {
+          const hit = test();
+          if (hit !== undefined && hit !== false) {
+            waiters.splice(waiters.indexOf(poll), 1);
+            clearTimeout(timer);
+            res(hit);
+          }
+        };
+        const timer = setTimeout(() => {
+          waiters.splice(waiters.indexOf(poll), 1);
+          rej(new Error(`${describe} not seen within ${timeoutMs} ms; frames: ${JSON.stringify(frames).slice(0, 300)}`));
+        }, timeoutMs);
+        waiters.push(poll);
+        poll();
+      });
     const socket = {
       events,
-      close: () => ws.close(1000),
-      waitFor(pred, timeoutMs = 4000) {
-        return new Promise((res, rej) => {
-          const started = Date.now();
-          const poll = () => {
-            const hit = events.find(pred);
-            if (hit) {
-              waiters.splice(waiters.indexOf(poll), 1);
-              clearTimeout(timer);
-              res(hit);
-            }
-          };
-          const timer = setTimeout(() => {
-            waiters.splice(waiters.indexOf(poll), 1);
-            rej(new Error(`no matching event within ${Date.now() - started} ms; saw ${JSON.stringify(events.map((e) => e.type))}`));
-          }, timeoutMs);
-          waiters.push(poll);
-          poll();
-        });
+      frames,
+      get closed() {
+        return closed;
       },
+      close: () => ws.close(1000),
+      waitFor: (pred, timeoutMs = 4000) => waitUntil(() => events.find(pred), timeoutMs, "event"),
+      /** 发一个心跳，等一个 pong。返回 pong 的原始文本。 */
+      async ping(timeoutMs = 4000) {
+        const before = frames.filter((f) => f === PONG_FRAME).length;
+        ws.send(PING_FRAME);
+        await waitUntil(() => frames.filter((f) => f === PONG_FRAME).length > before, timeoutMs, "pong");
+        return PONG_FRAME;
+      },
+      waitForClose: (timeoutMs = 4000) => waitUntil(() => closed ?? undefined, timeoutMs, "close"),
     };
     ws.addEventListener("open", () => resolve(socket));
     ws.addEventListener("error", () => reject(new Error("WebSocket connection failed")));
@@ -193,8 +215,24 @@ async function main() {
 
   console.log("\nsockets");
   const bobSocket = await connectSocket(bob.token); // bob 在线 → 配对时优先选他
-  const aliceSocket = await connectSocket(alice.token);
+  const aliceFirst = await connectSocket(alice.token);
   ok("both WebSockets connected");
+  try {
+    const pong = await bobSocket.ping();
+    check('client ping {"type":"ping"} -> server replies {"type":"pong"}', pong === PONG_FRAME);
+    await aliceFirst.ping();
+    ok("heartbeat works on both sockets");
+  } catch (err) {
+    fail("client ping -> pong", err.message);
+  }
+  // 同一设备的新连接顶掉旧连接，旧连接收到关闭码 4000
+  const aliceSocket = await connectSocket(alice.token);
+  try {
+    const closed = await aliceFirst.waitForClose();
+    check("second socket for the same device replaces the first (close code 4000)", closed.code === 4000, `code=${closed.code}`);
+  } catch (err) {
+    fail("old socket closed with 4000 on replacement", err.message);
+  }
 
   console.log("\nfax + reply");
   const sent = await api(alice.token, "POST", "/v1/faxes", { text: "  smoke test: hello stranger  " });

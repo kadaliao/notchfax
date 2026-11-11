@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { apiFetch, chunk, concat, connectedPair, Device, makePng, rawFetch, textChunk } from "./helpers";
+import { apiFetch, chunk, concat, connectedPair, Device, imageCount, makePng, rawFetch, textChunk } from "./helpers";
 
 describe("image upload requires a connected line", () => {
   it("is rejected with 403 line_not_connected while the line is delivered (even with a valid PNG)", async () => {
@@ -17,7 +17,7 @@ describe("image upload requires a connected line", () => {
     }
     const { n } = (await env.DB.prepare("SELECT COUNT(*) AS n FROM messages WHERE kind = 'image'").first<{ n: number }>())!;
     expect(n).toBe(0);
-    expect((await env.IMAGES.list()).objects).toHaveLength(0);
+    expect(await imageCount()).toBe(0);
   });
 
   it("is rejected while the line is queued", async () => {
@@ -80,7 +80,7 @@ describe("PNG validation", () => {
     expect(res.status, JSON.stringify(res.body)).toBe(400);
     expect(res.body.error.code).toBe("invalid_image");
     // 被拒绝的图片不落库、不进 R2
-    expect((await env.IMAGES.list()).objects).toHaveLength(0);
+    expect(await imageCount()).toBe(0);
     const { n } = (await env.DB.prepare("SELECT COUNT(*) AS n FROM messages WHERE kind = 'image'").first<{ n: number }>())!;
     expect(n).toBe(0);
   }
@@ -196,7 +196,7 @@ describe("daily image limit", () => {
     expect(denied.status).toBe(429);
     expect(denied.body.error.code).toBe("quota_exceeded");
     // 被拒绝的没有残留在 R2
-    expect((await env.IMAGES.list()).objects).toHaveLength(10);
+    expect(await imageCount()).toBe(10);
 
     // 每人各算各的
     expect((await b.image(lineId, png)).status).toBe(201);

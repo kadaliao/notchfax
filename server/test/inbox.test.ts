@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { runMaintenance } from "../src/service";
-import { connectedPair, Device, makePng } from "./helpers";
+import { connectedPair, Device, imageStored, makePng } from "./helpers";
 
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
@@ -102,12 +102,12 @@ describe("GET /v1/inbox and ack lifecycle", () => {
     // 23 小时：定时任务不删
     const early = await runMaintenance(env, Date.now() + 23 * HOUR);
     expect(early.imagesDeleted).toBe(0);
-    expect(await env.IMAGES.head(`images/${imageId}`)).not.toBeNull();
+    expect(await imageStored(imageId)).toBe(true);
 
-    // 25 小时：定时任务删除 R2 对象，之后任何人都取不到
+    // 25 小时：定时任务删除 BLOB，之后任何人都取不到
     const late = await runMaintenance(env, Date.now() + 25 * HOUR);
     expect(late.imagesDeleted).toBe(1);
-    expect(await env.IMAGES.head(`images/${imageId}`)).toBeNull();
+    expect(await imageStored(imageId)).toBe(false);
     expect((await b.fetchImage(imageId)).status).toBe(404);
     expect((await a.fetchImage(imageId)).status).toBe(404);
     // 元数据仍在
@@ -127,7 +127,7 @@ describe("GET /v1/inbox and ack lifecycle", () => {
     const up = await a.image(lineId, await makePng());
     const report = await runMaintenance(env, Date.now() + 10 * DAY);
     expect(report.imagesDeleted).toBe(0);
-    expect(await env.IMAGES.head(`images/${up.body.message.imageId}`)).not.toBeNull();
+    expect(await imageStored(up.body.message.imageId)).toBe(true);
   });
 });
 
@@ -162,7 +162,8 @@ describe("line timeouts (cron)", () => {
     const { a, b, lineId } = await connectedPair();
     expect((await runMaintenance(env, Date.now() + 29 * DAY)).linesClosed).toBe(0);
     // 15 天后有人发了一条，计时重置
-    await env.DB.prepare("UPDATE lines SET last_message_at = ?1 WHERE id = ?2").bind(Date.now() - 15 * DAY, lineId).run();
+    // 超时点是“最后一条消息 + 30 天”，所以最后一条在 15 天前 ⇔ 超时点在 15 天后
+    await env.DB.prepare("UPDATE lines SET expires_at = ?1 WHERE id = ?2").bind(Date.now() + 15 * DAY, lineId).run();
     expect((await runMaintenance(env, Date.now() + 20 * DAY)).linesClosed).toBe(1);
     expect((await a.lines()).body.lines).toEqual([]);
     expect((await b.say(lineId, "hello?")).status).toBe(409);
@@ -172,7 +173,7 @@ describe("line timeouts (cron)", () => {
     const a = await Device.create();
     const b = await Device.create();
     const sent = await a.fax("hello");
-    await env.DB.prepare("UPDATE lines SET matched_at = ?1 WHERE id = ?2").bind(Date.now() - 8 * DAY, sent.body.line.id).run();
+    await env.DB.prepare("UPDATE lines SET expires_at = ?1 WHERE id = ?2").bind(Date.now() - 1000, sent.body.line.id).run();
     expect((await b.lines()).body.lines).toEqual([]);
     const late = await b.say(sent.body.line.id, "hello");
     expect(late.status).toBe(409);
@@ -187,6 +188,6 @@ describe("line timeouts (cron)", () => {
     expect(report.linesPurged).toBe(1);
     const left = await env.DB.prepare("SELECT (SELECT COUNT(*) FROM lines) AS l, (SELECT COUNT(*) FROM messages) AS m").first<any>();
     expect(left).toEqual({ l: 0, m: 0 });
-    expect(await env.IMAGES.head(`images/${up.body.message.imageId}`)).toBeNull();
+    expect(await imageStored(up.body.message.imageId)).toBe(false);
   });
 });

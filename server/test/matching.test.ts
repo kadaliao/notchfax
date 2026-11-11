@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { createSessionFor, Device } from "./helpers";
+import { runMaintenance } from "../src/service";
+import { createSessionFor, Device, insertLine } from "./helpers";
 
 const DAY = 24 * 3600_000;
 
@@ -62,22 +63,27 @@ describe("POST /v1/faxes matching", () => {
   it("a full recipient is skipped and the fax stays queued when nobody else is eligible", async () => {
     const b = await Device.create();
     const a = await Device.create();
-    // 让 b 今天已经收满 5 条（直接写入历史线路）
-    const now = Date.now();
-    for (let i = 0; i < 5; i++) {
-      await env.DB.prepare(
-        `INSERT INTO lines (id, state, initiator_id, recipient_id, initiator_alias, recipient_alias, created_at, updated_at, matched_at, last_message_at)
-         VALUES (?1, 'delivered', ?2, ?3, 'AAAA', 'BBBB', ?4, ?4, ?4, ?4)`,
-      ).bind(`filler-${i}`, `other-sender-${i}`, b.id, now).run();
-    }
-    // a 的唯一候选人 b 已满
+    // b 今天已经收满 5 条新线路
+    await env.DB.prepare("UPDATE devices SET recv_day = ?1, recv_count = 5 WHERE id = ?2").bind(Math.floor(Date.now() / DAY), b.id).run();
     const res = await a.fax("hello");
     expect(res.body.line.state).toBe("queued");
-    // 昨天收满的不算数（惰性重置）：把 b 的记录挪到昨天，a 再发就能配上
-    await env.DB.prepare("UPDATE lines SET matched_at = ?1 WHERE recipient_id = ?2").bind(now - 2 * DAY, b.id).run();
+    // 昨天收满的不算数（惰性重置）：把 b 的计数挪到昨天，a 再发就能配上
+    await env.DB.prepare("UPDATE devices SET recv_day = recv_day - 1 WHERE id = ?1").bind(b.id).run();
     const again = await a.fax("hello again");
     expect(again.body.line.state).toBe("delivered");
     expect(await recipientOf(again.body.line.id)).toBe(b.id);
+  });
+
+  it("stops handing a device new lines after its 5th of the day", async () => {
+    const b = await Device.create();
+    const senders = await Promise.all(Array.from({ length: 6 }, () => Device.create()));
+    // 其他人今天的接收名额都用完（但仍可以发传真），这样 b 是唯一候选
+    await env.DB.prepare("UPDATE devices SET recv_day = ?1, recv_count = 5 WHERE id != ?2").bind(Math.floor(Date.now() / DAY), b.id).run();
+    const states: string[] = [];
+    for (const s of senders) states.push((await s.fax("ping")).body.line.state);
+    expect(states).toEqual(["delivered", "delivered", "delivered", "delivered", "delivered", "queued"]);
+    const { n } = (await env.DB.prepare("SELECT COUNT(*) AS n FROM lines WHERE recipient_id = ?1").bind(b.id).first<{ n: number }>())!;
+    expect(n).toBe(5);
   });
 
   it("excludes devices suspended from sending", async () => {
@@ -99,6 +105,29 @@ describe("POST /v1/faxes matching", () => {
     expect((await a.fax("hello")).body.line.state).toBe("queued");
     await setSeen(b, Date.now() - 6 * DAY);
     expect((await a.fax("hello again")).body.line.state).toBe("delivered");
+  });
+
+  it("does not scan the devices table: stale devices are dropped from the pool by the cron and come back on activity", async () => {
+    const a = await Device.create();
+    const b = await Device.create();
+    await setSeen(b, Date.now() - 8 * DAY);
+    expect((await runMaintenance(env, Date.now(), { demote: true })).devicesDemoted).toBe(1);
+    const row = await env.DB.prepare("SELECT rnd FROM devices WHERE id = ?1").bind(b.id).first<{ rnd: number | null }>();
+    expect(row!.rnd).toBeNull();
+    expect((await a.fax("hello")).body.line.state).toBe("queued");
+    // b 再次出现（任何已认证请求），重新进入配对池，a 的排队传真在 b 下次上线时配给它
+    await createSessionFor(b.identity);
+    const back = await env.DB.prepare("SELECT rnd FROM devices WHERE id = ?1").bind(b.id).first<{ rnd: number | null }>();
+    expect(back!.rnd).not.toBeNull();
+    expect((await b.inbox()).body.messages).toHaveLength(1);
+  });
+
+  it("does not demote devices that are online, even when last_seen is old", async () => {
+    await Device.create();
+    const b = await Device.create();
+    await b.connect();
+    await setSeen(b, Date.now() - 20 * DAY);
+    expect((await runMaintenance(env, Date.now(), { demote: true })).devicesDemoted).toBe(0);
   });
 
   it("excludes pairs that have reported each other, in either direction", async () => {
@@ -229,25 +258,29 @@ describe("queued faxes", () => {
     // 直接写库造 7 条已排队的线路（发件人是不存在的设备）
     const now = Date.now();
     for (let i = 0; i < 7; i++) {
-      const lineId = `q-${i}`;
-      await env.DB.prepare(
-        `INSERT INTO lines (id, state, initiator_id, initiator_alias, created_at, updated_at, last_message_at) VALUES (?1, 'queued', ?2, 'AAAA', ?3, ?3, ?3)`,
-      ).bind(lineId, `ghost-${i}`, now - (7 - i) * 1000).run();
+      const created = now - (7 - i) * 1000;
+      await insertLine({ id: `q-${i}`, state: "queued", initiator: `ghost-${i}`, now: created, expiresAt: created + 72 * 3600_000 });
       await env.DB.prepare(
         `INSERT INTO messages (id, line_id, sender_id, kind, text, sent_at) VALUES (?1, ?2, ?3, 'text', ?4, ?5)`,
-      ).bind(`m-${i}`, lineId, `ghost-${i}`, `queued ${i}`, now - (7 - i) * 1000).run();
+      ).bind(`m-${i}`, `q-${i}`, `ghost-${i}`, `queued ${i}`, created).run();
     }
     const fresh = await Device.create(); // 新设备 → 会话建立触发配对
     const { results } = await env.DB.prepare("SELECT id FROM lines WHERE recipient_id = ?1 ORDER BY created_at").bind(fresh.id).all<{ id: string }>();
     expect(results.map((r) => r.id)).toEqual(["q-0", "q-1", "q-2", "q-3", "q-4"]);
     const left = await env.DB.prepare("SELECT COUNT(*) AS n FROM lines WHERE state = 'queued'").first<{ n: number }>();
     expect(left!.n).toBe(2);
+    // 收件人的名额记在 devices 上，并且排队线路里的第一封补上了 to_id
+    const dev = await env.DB.prepare("SELECT recv_count FROM devices WHERE id = ?1").bind(fresh.id).first<{ recv_count: number }>();
+    expect(dev!.recv_count).toBe(5);
+    expect((await fresh.inbox()).body.messages).toHaveLength(5);
   });
 
   it("older than 72 hours are not matched", async () => {
     const a = await Device.create();
     const queued = await a.fax("stale");
-    await env.DB.prepare("UPDATE lines SET created_at = ?1 WHERE id = ?2").bind(Date.now() - 73 * 3600_000, queued.body.line.id).run();
+    await env.DB.prepare("UPDATE lines SET created_at = ?1, expires_at = ?2 WHERE id = ?3")
+      .bind(Date.now() - 73 * 3600_000, Date.now() - 3600_000, queued.body.line.id)
+      .run();
     await Device.create();
     expect(await recipientOf(queued.body.line.id)).toBeNull();
   });

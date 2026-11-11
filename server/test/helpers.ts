@@ -148,11 +148,14 @@ const openSockets = new Set<WsClient>();
 
 export class WsClient {
   events: any[] = [];
+  /** 收到的原始文本帧（未解析）。 */
+  rawMessages: string[] = [];
   closeInfo: { code: number; reason: string } | null = null;
   private waiters: Array<() => void> = [];
 
   private constructor(readonly ws: WebSocket) {
     ws.addEventListener("message", (ev) => {
+      this.rawMessages.push(ev.data as string);
       try {
         this.events.push(JSON.parse(ev.data as string));
       } catch {
@@ -189,6 +192,24 @@ export class WsClient {
       if (found) return found;
       const left = deadline - Date.now();
       if (left <= 0) throw new Error(`timed out waiting for event; got ${JSON.stringify(this.events)}`);
+      await new Promise<void>((resolve) => {
+        const t = setTimeout(resolve, left);
+        this.waiters.push(() => {
+          clearTimeout(t);
+          resolve();
+        });
+      });
+    }
+  }
+
+  /** 等到收到满足条件的原始文本帧。 */
+  async waitForRaw(pred: (raw: string) => boolean, timeoutMs = 4000): Promise<string> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const found = this.rawMessages.find(pred);
+      if (found !== undefined) return found;
+      const left = deadline - Date.now();
+      if (left <= 0) throw new Error(`timed out waiting for raw frame; got ${JSON.stringify(this.rawMessages)}`);
       await new Promise<void>((resolve) => {
         const t = setTimeout(resolve, left);
         this.waiters.push(() => {
@@ -238,13 +259,50 @@ export async function closeAllSockets(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export async function resetAll(): Promise<void> {
-  await env.DB.batch(["reports", "messages", "lines", "devices"].map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
-  let cursor: string | undefined;
-  do {
-    const listed = await env.IMAGES.list({ cursor });
-    if (listed.objects.length > 0) await env.IMAGES.delete(listed.objects.map((o) => o.key));
-    cursor = listed.truncated ? listed.cursor : undefined;
-  } while (cursor);
+  await env.DB.batch(["reports", "images", "messages", "lines", "devices"].map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
+}
+
+/** images 表（BLOB）里是否还有这张图。 */
+export async function imageStored(imageId: string): Promise<boolean> {
+  const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM images WHERE id = ?1").bind(imageId).first<{ n: number }>();
+  return (row?.n ?? 0) > 0;
+}
+
+export async function imageCount(): Promise<number> {
+  const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM images").first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+/** 直接往库里造一条线路（测试用，绕过配对）。 */
+export async function insertLine(opts: {
+  id: string;
+  state?: "queued" | "delivered" | "connected" | "closed";
+  initiator: string;
+  recipient?: string | null;
+  now?: number;
+  expiresAt?: number;
+  matchedAt?: number | null;
+}): Promise<void> {
+  const now = opts.now ?? Date.now();
+  const state = opts.state ?? "delivered";
+  const recipient = opts.recipient ?? null;
+  await env.DB.prepare(
+    `INSERT INTO lines (id, state, initiator_id, recipient_id, initiator_alias, recipient_alias,
+                        created_at, updated_at, matched_at, closed_at, expires_at)
+     VALUES (?1, ?2, ?3, ?4, '1111', ?5, ?6, ?6, ?7, ?8, ?9)`,
+  )
+    .bind(
+      opts.id,
+      state,
+      opts.initiator,
+      recipient,
+      recipient ? "2222" : null,
+      now,
+      opts.matchedAt === undefined ? (recipient ? now : null) : opts.matchedAt,
+      state === "closed" ? now : null,
+      opts.expiresAt ?? now + 7 * 24 * 3600_000,
+    )
+    .run();
 }
 
 // ---------------------------------------------------------------------------

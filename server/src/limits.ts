@@ -1,5 +1,8 @@
 import { DAY, HOUR } from "./util";
 
+/** 已认证请求顺带刷新 last_seen 的最小间隔。只用于“最近 7 天活跃”的判断，不需要精确。 */
+export const LAST_SEEN_REFRESH_MS = 6 * HOUR;
+
 export const MAX_TEXT_CHARS = 500;
 
 /** 每台设备每天新线路额度的默认值与上限（对方回复一次 +1）。 */

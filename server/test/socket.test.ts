@@ -1,4 +1,4 @@
-import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { connectedPair, Device, makePng, rawFetch } from "./helpers";
@@ -137,30 +137,60 @@ describe("WebSocket events", () => {
     expect(first.events.filter((e) => e.type === "fax")).toEqual([]);
   });
 
-  it("sends ping on the heartbeat alarm and accepts pong", async () => {
+  it("answers the client's heartbeat with the exact pong frame, without the server ever pinging first", async () => {
     const device = await Device.create();
-    const socket = await device.connect();
-    const stub = env.DEVICE_SOCKET.get(env.DEVICE_SOCKET.idFromName(device.id));
-    expect(await runDurableObjectAlarm(stub)).toBe(true);
-    await socket.waitFor((e) => e.type === "ping");
-    socket.send({ type: "pong" });
-    // 心跳继续：alarm 被重新安排
-    expect(await runDurableObjectAlarm(stub)).toBe(true);
-    await until(async () => socket.events.filter((e) => e.type === "ping").length >= 2);
-    expect(socket.closeInfo).toBeNull();
+    const raw = await device.connect();
+    raw.ws.send('{"type":"ping"}');
+    const pong = await raw.waitForRaw((m) => m === '{"type":"pong"}');
+    expect(pong).toBe('{"type":"pong"}');
+    // 服务器从不主动发心跳：等一会儿，除了 pong 以外不会有别的帧
+    await new Promise((r) => setTimeout(r, 150));
+    expect(raw.rawMessages).toEqual(['{"type":"pong"}']);
   });
 
-  it("closes a connection that stops answering pings and marks the device offline", async () => {
+  it("keeps answering heartbeats after the Durable Object has been evicted (hibernation)", async () => {
     const device = await Device.create();
     const socket = await device.connect();
     const stub = env.DEVICE_SOCKET.get(env.DEVICE_SOCKET.idFromName(device.id));
-    // 模拟 100 秒以上没有任何客户端消息：把 lastSeen 拨回去
-    await runInDurableObject(stub, async (_instance, state) => {
-      for (const ws of state.getWebSockets()) ws.serializeAttachment({ lastSeen: Date.now() - 200_000 });
-    });
-    expect(await runDurableObjectAlarm(stub)).toBe(true);
-    const closed = await socket.waitForClose();
-    expect(closed.code).toBe(4001);
-    await until(async () => !(await isOnline(device)));
+    await evictDurableObject(stub);
+    socket.ws.send('{"type":"ping"}');
+    await socket.waitForRaw((m) => m === '{"type":"pong"}');
+    // 休眠醒来后仍能收到推送
+    const other = await Device.create();
+    await other.fax("wake up");
+    const fax = await socket.waitFor((e) => e.type === "fax");
+    expect(fax.message.text).toBe("wake up");
+  });
+
+  it("answers a heartbeat that differs in whitespace too, so a sloppy client is not mistaken for dead", async () => {
+    const device = await Device.create();
+    const socket = await device.connect();
+    socket.ws.send('{ "type": "ping" }');
+    await socket.waitForRaw((m) => m === '{"type":"pong"}');
+  });
+
+  it("never schedules an alarm and never writes Durable Object storage", async () => {
+    const device = await Device.create();
+    const socket = await device.connect();
+    const other = await Device.create();
+    await other.fax("hello");
+    await socket.waitFor((e) => e.type === "fax");
+    socket.ws.send('{"type":"ping"}');
+    await socket.waitForRaw((m) => m === '{"type":"pong"}');
+    const stub = env.DEVICE_SOCKET.get(env.DEVICE_SOCKET.idFromName(device.id));
+    const state = await runInDurableObject(stub, async (_instance, ctx) => ({
+      alarm: await ctx.storage.getAlarm(),
+      keys: [...(await ctx.storage.list()).keys()],
+    }));
+    expect(state.alarm).toBeNull();
+    expect(state.keys).toEqual([]);
+  });
+
+  it("stays connected without any client traffic for as long as the test runs (no server-side timeout)", async () => {
+    const device = await Device.create();
+    const socket = await device.connect();
+    await new Promise((r) => setTimeout(r, 300));
+    expect(socket.closeInfo).toBeNull();
+    expect(await isOnline(device)).toBe(true);
   });
 });

@@ -9,13 +9,13 @@ import {
   listLines,
   matchQueuedFor,
   meView,
+  openSession,
   runMaintenance,
   sendFax,
   sendImage,
   sendMessage,
   tearLine,
   touchDevice,
-  upsertDevice,
 } from "./service";
 import type { AppEnv, DeviceRow } from "./types";
 import { base64urlEncode, readJsonObject } from "./util";
@@ -59,11 +59,11 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
   if (resource === "session" && segments.length === 2) {
     if (method !== "POST") throw Errors.notFound("no such endpoint");
     const { publicKey, deviceId } = await verifySessionRequest(await readJsonObject(request), now);
-    await upsertDevice(env, deviceId, base64urlEncode(publicKey), now);
+    const device = await openSession(env, deviceId, base64urlEncode(publicKey), now);
     const expiresAt = now + TOKEN_TTL_MS;
     const token = await signToken(env.SESSION_SECRET, deviceId, now, expiresAt);
     // 设备打开会话时，把排队中的传真配给它
-    await matchQueuedFor(env, deviceId, now);
+    await matchQueuedFor(env, device, now, device.online === 1);
     return json({ token, expiresAt, deviceId });
   }
 
@@ -80,7 +80,7 @@ async function route(request: Request, env: AppEnv, ctx: ExecutionContext): Prom
     });
     const response = await stub.fetch(upgrade);
     // 新连接建立后，把排队中的传真配给这台设备（它会通过新连接收到 fax 事件）
-    ctx.waitUntil(matchQueuedFor(env, device.id, Date.now()).catch(() => undefined));
+    ctx.waitUntil(matchQueuedFor(env, device, Date.now(), true).catch(() => undefined));
     return response;
   }
 
