@@ -1,0 +1,51 @@
+name: Notchfax
+options:
+  bundleIdPrefix: com.kadaliao
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  developmentLanguage: zh-Hans
+packages:
+  NotchfaxKit:
+    path: Packages/NotchfaxKit
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+targets:
+  Notchfax:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Notchfax
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSUIElement: true
+        LSApplicationCategoryType: public.app-category.utilities
+        NSCameraUsageDescription: Notchfax 需要使用摄像头来拍大头贴。照片只保存在这台 Mac 上。
+        NSPhotoLibraryUsageDescription: Notchfax 需要读取照片图库，为你打印“那年今日”的照片。照片不会离开这台 Mac。
+        NSHumanReadableCopyright: ""
+    dependencies:
+      - package: NotchfaxKit
+        product: PrintKit
+      - package: NotchfaxKit
+        product: Memories
+      - package: NotchfaxKit
+        product: PhotoBooth
+      - package: NotchfaxKit
+        product: FaxKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kadaliao.notchfax
+        PRODUCT_NAME: Notchfax
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""
+        ENABLE_HARDENED_RUNTIME: NO
+        ENABLE_APP_SANDBOX: NO
+        GENERATE_INFOPLIST_FILE: NO

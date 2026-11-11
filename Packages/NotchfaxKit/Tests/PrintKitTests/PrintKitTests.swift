@@ -1,0 +1,277 @@
+import CoreGraphics
+import Foundation
+import Testing
+
+@testable import PrintKit
+
+@Suite struct PrintQueueTests {
+    @Test func `first job starts at once and the rest wait in order`() {
+        var queue = PrintQueue<Int>()
+        #expect(queue.enqueue(1) == 1)
+        #expect(queue.enqueue(2) == nil)
+        #expect(queue.enqueue(3) == nil)
+        #expect(queue.active == 1)
+        #expect(queue.pending == [2, 3])
+        #expect(queue.finishActive() == 2)
+        #expect(queue.finishActive() == 3)
+        #expect(queue.finishActive() == nil)
+        #expect(queue.isIdle)
+    }
+
+    @Test func `a waiting job asks the hanging sheet to hurry`() {
+        var queue = PrintQueue<Int>()
+        _ = queue.enqueue(1)
+        #expect(!queue.shouldHurryActive)
+        _ = queue.enqueue(2)
+        #expect(queue.shouldHurryActive)
+        _ = queue.finishActive()
+        #expect(!queue.shouldHurryActive)
+    }
+
+    @Test func `cancelling distinguishes waiting, active and unknown jobs`() {
+        var queue = PrintQueue<Int>()
+        _ = queue.enqueue(1)
+        _ = queue.enqueue(2)
+        _ = queue.enqueue(3)
+        #expect(queue.cancel(2) == .removedPending)
+        #expect(queue.cancel(1) == .isActive)
+        #expect(queue.cancel(9) == .unknown)
+        #expect(queue.active == 1)
+        #expect(queue.finishActive() == 3)
+    }
+
+    @Test func `the same job cannot be queued twice`() {
+        var queue = PrintQueue<Int>()
+        _ = queue.enqueue(1)
+        #expect(queue.enqueue(1) == nil)
+        _ = queue.enqueue(2)
+        #expect(queue.enqueue(2) == nil)
+        #expect(queue.pending == [2])
+        #expect(queue.removeAllPending() == [2])
+        #expect(queue.pending.isEmpty)
+    }
+}
+
+@Suite struct FeedProgramTests {
+    @Test(arguments: [FeedCadence.photo, .text(), .retract, .insert])
+    func `position runs monotonically from zero to the full distance`(cadence: FeedCadence) {
+        let program = FeedProgram(distance: 233, cadence: cadence, seed: 4)
+        #expect(program.position(at: -1) == 0)
+        #expect(program.position(at: 0) == 0)
+        var previous = 0.0
+        var t = 0.0
+        while t <= program.duration + 0.05 {
+            let p = program.position(at: t)
+            #expect(p >= previous - 1e-9)
+            previous = p
+            t += 0.002
+        }
+        #expect(abs(previous - 233) < 1e-6)
+        #expect(program.isFinished(at: program.duration))
+    }
+
+    @Test func `paper advances in bursts with pauses between them`() throws {
+        let cadence = FeedCadence(stepLength: 10, stepDuration: 0.05, dwell: 0.05)
+        let program = FeedProgram(distance: 100, cadence: cadence)
+        #expect(program.steps.count == 10)
+        #expect(abs(program.duration - (10 * 0.05 + 9 * 0.05)) < 1e-9)
+        // Mid-dwell after the first burst: exactly one step out, and not moving.
+        #expect(abs(program.position(at: 0.075) - 10) < 1e-9)
+        #expect(program.position(at: 0.09) == program.position(at: 0.075))
+        // Mid-burst: strictly between two steps.
+        let moving = program.position(at: 0.125)
+        #expect(moving > 10 && moving < 20)
+        #expect(program.stepIndex(at: 0.125) == 1)
+    }
+
+    @Test func `the last burst covers only what is left`() throws {
+        let program = FeedProgram(distance: 25, cadence: FeedCadence(stepLength: 10, stepDuration: 0.05, dwell: 0.02))
+        let last = try #require(program.steps.last)
+        #expect(program.steps.count == 3)
+        #expect(abs(last.to - last.from - 5) < 1e-9)
+        #expect(last.duration < 0.05)
+    }
+
+    @Test func `variation changes the rhythm but not the distance, and is deterministic`() {
+        let cadence = FeedCadence.text(lineHeight: 14)
+        let a = FeedProgram(distance: 300, cadence: cadence, seed: 1)
+        let b = FeedProgram(distance: 300, cadence: cadence, seed: 1)
+        let c = FeedProgram(distance: 300, cadence: cadence, seed: 2)
+        #expect(a == b)
+        #expect(a.duration != c.duration)
+        #expect(a.steps.count == c.steps.count)
+        #expect(c.position(at: c.duration) == 300)
+    }
+
+    @Test func `an empty program is finished immediately`() {
+        let program = FeedProgram(distance: 0, cadence: .photo)
+        #expect(program.steps.isEmpty)
+        #expect(program.duration == 0)
+        #expect(program.position(at: 1) == 0)
+        #expect(program.stepIndex(at: 1) == nil)
+    }
+}
+
+@Suite struct SlotGeometryTests {
+    let external = ScreenDescriptor(frame: CGRect(x: 0, y: 0, width: 1920, height: 1080), isMain: true)
+    let notched = ScreenDescriptor(
+        frame: CGRect(x: 1920, y: 0, width: 1512, height: 982),
+        safeAreaTop: 32,
+        topLeftAuxWidth: 663.5,
+        topRightAuxWidth: 663.5,
+        isBuiltIn: true
+    )
+
+    @Test func `a display without a notch gets a drawn slot at top centre`() {
+        let slot = SlotGeometry.make(for: external)
+        #expect(slot.kind == .drawnSlot)
+        #expect(slot.centerX == 960)
+        #expect(slot.mouth.midX == 960)
+        #expect(slot.mouth.minY == 0)
+        #expect(slot.slotLineY > 0 && slot.slotLineY < slot.mouth.maxY)
+        #expect(slot.maxPaperWidth < slot.mouth.width)
+    }
+
+    @Test func `a notched display puts the slot line at the bottom of the notch`() throws {
+        let rect = try #require(notched.notchRect)
+        #expect(rect == CGRect(x: 663.5, y: 0, width: 185, height: 32))
+        let slot = SlotGeometry.make(for: notched, simulateNotch: true)
+        #expect(slot.kind == .notch)
+        #expect(slot.slotLineY == 32)
+        #expect(slot.centerX == 756)
+        #expect(slot.maxPaperWidth == 165)
+    }
+
+    @Test func `simulating a notch only affects displays without one`() {
+        let slot = SlotGeometry.make(for: external, simulateNotch: true)
+        #expect(slot.kind == .simulatedNotch)
+        #expect(slot.mouth.size == SlotGeometry.simulatedNotchSize)
+        #expect(slot.slotLineY == SlotGeometry.simulatedNotchSize.height)
+    }
+
+    @Test func `the notched display wins, then built-in, then main`() {
+        let plainBuiltIn = ScreenDescriptor(frame: CGRect(x: 0, y: 0, width: 1440, height: 900), isBuiltIn: true)
+        let other = ScreenDescriptor(frame: CGRect(x: 0, y: 0, width: 2560, height: 1440))
+        #expect(SlotGeometry.preferredScreenIndex([external, notched]) == 1)
+        #expect(SlotGeometry.preferredScreenIndex([external, plainBuiltIn]) == 1)
+        #expect(SlotGeometry.preferredScreenIndex([other, external]) == 1)
+        #expect(SlotGeometry.preferredScreenIndex([other]) == 0)
+        #expect(SlotGeometry.preferredScreenIndex([]) == nil)
+    }
+
+    @Test func `wide sheets are scaled to fit through the slot`() {
+        let slot = SlotGeometry.make(for: notched)
+        #expect(slot.fittingScale(forPaperWidth: 120) == 1)
+        #expect(abs(slot.fittingScale(forPaperWidth: 330) - 0.5) < 1e-9)
+    }
+
+    @Test func `a zero safe area or missing auxiliary areas means no notch`() {
+        var screen = notched
+        screen.safeAreaTop = 0
+        #expect(screen.notchRect == nil)
+        screen = notched
+        screen.topRightAuxWidth = nil
+        #expect(screen.notchRect == nil)
+    }
+}
+
+@Suite struct MotionTests {
+    @Test(arguments: [0.3, 0.6, 1.0])
+    func `a spring settles on its target`(damping: Double) {
+        var spring = Spring(value: 0, velocity: 0)
+        for _ in 0..<600 { spring.step(to: 10, response: 0.4, damping: damping, dt: 1.0 / 120) }
+        #expect(spring.isSettled(at: 10, tolerance: 0.01, speed: 0.1))
+    }
+
+    @Test func `a critically damped spring does not overshoot, an underdamped one does`() {
+        var critical = Spring(), bouncy = Spring()
+        var criticalPeak = 0.0, bouncyPeak = 0.0
+        for _ in 0..<400 {
+            critical.step(to: 1, response: 0.4, damping: 1, dt: 1.0 / 120)
+            bouncy.step(to: 1, response: 0.4, damping: 0.4, dt: 1.0 / 120)
+            criticalPeak = max(criticalPeak, critical.value)
+            bouncyPeak = max(bouncyPeak, bouncy.value)
+        }
+        #expect(criticalPeak <= 1 + 1e-9)
+        #expect(bouncyPeak > 1.05)
+    }
+
+    @Test func `stepping is independent of frame rate`() {
+        var coarse = Spring(value: 0, velocity: 300), fine = Spring(value: 0, velocity: 300)
+        for _ in 0..<30 { coarse.step(to: 50, response: 0.5, damping: 0.5, dt: 1.0 / 60) }
+        for _ in 0..<120 { fine.step(to: 50, response: 0.5, damping: 0.5, dt: 1.0 / 240) }
+        #expect(abs(coarse.value - fine.value) < 1e-6)
+        #expect(abs(coarse.velocity - fine.velocity) < 1e-5)
+    }
+
+    @Test func `the analytic velocity matches the change in position`() {
+        var spring = Spring(value: 0, velocity: 0)
+        let dt = 1e-5
+        spring.step(to: 1, response: 0.3, damping: 0.5, dt: 0.05)
+        let before = spring
+        spring.step(to: 1, response: 0.3, damping: 0.5, dt: dt)
+        #expect(abs((spring.value - before.value) / dt - before.velocity) < 0.01)
+    }
+
+    @Test func `a soft limit tracks small input one to one and never exceeds the limit`() {
+        #expect(abs(Motion.softLimit(0.01, limit: 10) - 0.01) < 1e-6)
+        #expect(Motion.softLimit(1000, limit: 10) <= 10)
+        #expect(Motion.softLimit(-1000, limit: 10) >= -10)
+        #expect(Motion.softLimit(5, limit: 10) < 5)
+    }
+
+    @Test func `a pushed pendulum swings back and comes to rest hanging down`() {
+        var pendulum = Pendulum()
+        for _ in 0..<12 { pendulum.step(pivotAcceleration: 9000, length: 100, dt: 1.0 / 120) }
+        #expect(pendulum.angle > 0.05)
+        for _ in 0..<600 { pendulum.step(pivotAcceleration: 0, length: 100, dt: 1.0 / 120) }
+        #expect(abs(pendulum.angle) < 0.002)
+        #expect(abs(pendulum.omega) < 0.01)
+    }
+}
+
+@Suite struct PaperLayoutTests {
+    @Test(arguments: Paper.allCases)
+    func `the content area sits inside the sheet`(paper: Paper) {
+        let size = paper.defaultSize
+        let rect = paper.contentRect(in: size)
+        #expect(CGRect(origin: .zero, size: size).contains(rect))
+        #expect(rect.width > size.width * 0.8)
+    }
+
+    @Test func `strip frames are four equal, non-overlapping boxes above the footer`() {
+        let content = Paper.photoStrip.contentRect(in: Paper.photoStrip.defaultSize).size
+        let rects = Paper.stripFrameRects(contentSize: content)
+        #expect(rects.count == 4)
+        for (a, b) in zip(rects, rects.dropFirst()) {
+            #expect(a.height == b.height)
+            #expect(abs(b.minY - a.maxY - Paper.stripFrameGap) < 1e-9)
+        }
+        #expect(abs((rects.last?.maxY ?? 0) - (content.height - Paper.stripFooterHeight)) < 1e-9)
+    }
+
+    @Test func `a pose maps its pivot onto the stage and round-trips other points`() {
+        let pose = SheetPose(pivotLocal: CGPoint(x: 80, y: 0), pivotStage: CGPoint(x: 500, y: 32), angle: 0.3)
+        let pivot = pose.stagePoint(CGPoint(x: 80, y: 0))
+        #expect(abs(pivot.x - 500) < 1e-9 && abs(pivot.y - 32) < 1e-9)
+        let local = CGPoint(x: 12, y: 140)
+        let back = pose.localPoint(pose.stagePoint(local))
+        #expect(abs(back.x - local.x) < 1e-9 && abs(back.y - local.y) < 1e-9)
+        // Positive angles swing the hanging end towards −x.
+        #expect(pose.stagePoint(CGPoint(x: 80, y: 100)).x < 500)
+    }
+}
+
+@Suite struct SoundSynthTests {
+    @Test(arguments: [
+        SoundEffect.feedStep(duration: 0.05, variant: 0), .cutter, .tear, .shutter, .slip, .thunk, .tick,
+    ])
+    func `every effect is short, finite, within range and ends quietly`(effect: SoundEffect) {
+        let samples = SoundSynth.samples(for: effect)
+        #expect(!samples.isEmpty)
+        #expect(Double(samples.count) / SoundSynth.sampleRate < 0.5)
+        #expect(samples.allSatisfy { $0.isFinite && abs($0) <= 1 })
+        #expect(samples.contains { abs($0) > 0.02 })
+        #expect(samples.suffix(20).allSatisfy { abs($0) < 0.08 })
+    }
+}
