@@ -113,5 +113,5 @@ struct FaxEnvironment: Sendable {
     }
 
     /// The public relay that Release builds talk to unless another address is set.
-    static let publicServer = "https://notchfax-relay.kadaliao.workers.dev"
+    static let publicServer = "https://notchfax.liaoxingyi.com"
 }

@@ -11,6 +11,11 @@
   // 不记录 IP：关闭 Workers 日志与追踪，代码里也不读取 CF-Connecting-IP 等头。
   "observability": { "enabled": false },
 
+  // 自定义域名（workers.dev 在中国大陆基本连不上）。workers.dev 地址保留，0.1.0 的客户端还在用。
+  // 换账号部署时删掉或改成自己的域名。
+  "routes": [{ "pattern": "notchfax.liaoxingyi.com", "custom_domain": true }],
+  "workers_dev": true,
+
   "d1_databases": [
     {
       "binding": "DB",

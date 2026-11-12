@@ -20,7 +20,7 @@ brew install --cask kadaliao/tap/notchfax
 
 或者到 [Releases](https://github.com/kadaliao/notchfax/releases/latest) 下载 dmg，把 Notchfax 拖进「应用程序」。需要 macOS 14 以上，Apple Silicon 和 Intel 通用。
 
-第一次启动会请求照片图库和摄像头权限，分别用于那年今日和大头贴。传真默认连公共中继 `notchfax-relay.kadaliao.workers.dev`；这个域名在中国大陆可能需要代理，也可以在菜单的「传真服务器…」里换成自己部署的地址。
+第一次启动会请求照片图库和摄像头权限，分别用于那年今日和大头贴。传真默认连公共中继 `notchfax.liaoxingyi.com`，也可以在菜单的「传真服务器…」里换成自己部署的地址。
 
 ## 从源码构建
 
