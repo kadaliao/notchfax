@@ -232,17 +232,23 @@ public final class SoundPlayer {
 
     public init() {}
 
+    /// Hears every sound asked for, muted or not, as samples. Offline renders build
+    /// their soundtrack from this.
+    var tap: (([Float]) -> Void)?
+
     public func play(_ effect: SoundEffect) {
-        guard !isMuted, !isDisabled else { return }
         let key = Self.cacheKey(effect)
+        tap?(SoundSynth.samples(for: key))
+        guard !isMuted, !isDisabled else { return }
         if buffers[key] == nil { buffers[key] = makeBuffer(SoundSynth.samples(for: key)) }
         if let buffer = buffers[key] { schedule(buffer) }
     }
 
     /// The run of small snaps a travelling tear makes. `index` 0 is the final one.
     func playTearGrain(_ index: Int) {
-        guard !isMuted, !isDisabled else { return }
         let slot = index == 0 ? 0 : 1 + abs(index) % 5
+        tap?(SoundSynth.tearGrain(slot))
+        guard !isMuted, !isDisabled else { return }
         if grains[slot] == nil { grains[slot] = makeBuffer(SoundSynth.tearGrain(slot)) }
         if let buffer = grains[slot] { schedule(buffer) }
     }
