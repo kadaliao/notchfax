@@ -1,7 +1,7 @@
 // Notchfax relay server.
 // 本地开发（wrangler dev）与测试全部使用本地模拟的 D1 / Durable Object，不需要任何 Cloudflare 账号。
 // 只用 D1 + Durable Object + Worker，Cloudflare 免费套餐就够（图片以 BLOB 存 D1，不需要 R2）。
-// 下面的 database_id 是占位符，真实部署前要替换，见 README.md 的“部署需要什么”。
+// database_id 指向线上的 notchfax 数据库；换账号部署时要替换，见 README.md 的“部署需要什么”。
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "notchfax-relay",
@@ -16,7 +16,7 @@
       "binding": "DB",
       "database_name": "notchfax",
       // 占位符：真实部署时用 `wrangler d1 create notchfax` 返回的 id 替换
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "86a9504d-bfba-4d17-94ea-548529a1d241",
       "migrations_dir": "migrations"
     }
   ],

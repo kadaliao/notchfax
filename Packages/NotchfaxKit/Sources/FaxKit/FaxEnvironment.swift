@@ -99,7 +99,7 @@ struct FaxEnvironment: Sendable {
         #endif
     }
 
-    /// The launch argument, then the user default, then (Debug builds only) the local dev server.
+    /// The launch argument, then the user default, then the local dev server in Debug builds or the public relay in Release builds.
     static func resolveServer(launch: URL?, defaults: UserDefaults) -> URL? {
         if let launch { return launch }
         if let string = defaults.string(forKey: serverDefaultsKey), let url = FaxLaunchOptions.validServer(string) {
@@ -108,7 +108,10 @@ struct FaxEnvironment: Sendable {
         #if DEBUG
         return URL(string: "http://127.0.0.1:8787")
         #else
-        return nil
+        return URL(string: publicServer)
         #endif
     }
+
+    /// The public relay that Release builds talk to unless another address is set.
+    static let publicServer = "https://notchfax-relay.kadaliao.workers.dev"
 }

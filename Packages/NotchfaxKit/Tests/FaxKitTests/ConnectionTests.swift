@@ -262,9 +262,8 @@ private func eventually(_ timeout: Double = 2, _ condition: @Sendable () async -
         let factory = FakeFactory(answersPings: true)
         let connection = FaxConnection(authority: FakeAuthority(), factory: factory, timing: Self.fast, random: { 0 })
         await connection.start()
-        try? await Task.sleep(for: .milliseconds(450))
+        #expect(await eventually { (factory.last?.sent.withLock { $0.count } ?? 0) >= 3 })
         let sent = factory.last?.sent.withLock { $0 } ?? []
-        #expect(sent.count >= 3)
         #expect(sent.allSatisfy { $0 == #"{"type":"ping"}"# })
         #expect(factory.count == 1, "answered pings must not trigger a reconnect")
         await connection.stop()
