@@ -1,7 +1,19 @@
 import AppKit
 import SwiftUI
 
-/// A panel that floats above the menu bar and never takes focus.
+/// Where the machine's windows sit among everything else on screen.
+///
+/// Other notch utilities float their windows anywhere from just above the menu bar up to
+/// the screen-saver level. While the machine is working, its paper and panels must not be
+/// drawn over by them, so everything here starts at the top of that range.
+public enum OverlayLevel {
+    /// The level `offset` steps above the base. Higher offsets are in front.
+    public static func level(_ offset: Int) -> NSWindow.Level {
+        NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + offset)
+    }
+}
+
+/// A panel that floats above every ordinary window and never takes focus.
 class OverlayPanel: NSPanel {
     var allowsKey = false
 
@@ -10,7 +22,7 @@ class OverlayPanel: NSPanel {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
-        level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + offset)
+        level = OverlayLevel.level(offset)
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         isFloatingPanel = true
         hidesOnDeactivate = false
@@ -92,7 +104,7 @@ final class Stage: NSObject, SheetHost {
 
     var forcesReducedMotion = false
     var reduceMotion: Bool { forcesReducedMotion || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
-    var presentationLevel: NSWindow.Level { NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1) }
+    var presentationLevel: NSWindow.Level { OverlayLevel.level(1) }
     var hasSheets: Bool { !controllers.isEmpty }
 
     // MARK: Lifecycle

@@ -1,4 +1,5 @@
 import AppKit
+import PrintKit
 import QuartzCore
 
 /// The booth's flash: the whole screen lights up for an instant, brightest at the top
@@ -60,7 +61,7 @@ final class ScreenFlash {
         panel.isReleasedWhenClosed = false
         panel.animationBehavior = .none
         // Above the paper and the machine: the flash lights everything.
-        panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 8)
+        panel.level = OverlayLevel.level(8)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
 
         let view = NSView()
