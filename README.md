@@ -22,6 +22,55 @@ brew install --cask kadaliao/tap/notchfax
 
 第一次启动会请求照片图库和摄像头权限，分别用于那年今日和大头贴。传真默认连公共中继 `notchfax.liaoxingyi.com`，也可以在菜单的「传真服务器…」里换成自己部署的地址。
 
+## 命令行
+
+菜单里点「安装命令行工具…」，会在 `/usr/local/bin` 放一个 `notchfax`（要输一次管理员密码）。它就是 App 自己的可执行文件，所以也可以自己建链接：
+
+```sh
+ln -s /Applications/Notchfax.app/Contents/MacOS/Notchfax ~/.local/bin/notchfax
+```
+
+```sh
+notchfax print 你好                         # 一张热敏小票
+echo 你好 | notchfax print                  # 从管道读
+notchfax print -i 截图.png "## 今天的截图"  # 图在上、字在下，图会抖成黑白点
+notchfax print --photo -i 照片.jpg          # 印在光面相纸上
+notchfax help                               # 全部选项
+```
+
+Notchfax 没在运行时会在后台把它打开再打印（`--no-launch` 则直接失败）。命令在打印请求排进队列时就返回，不等纸出来。退出码：0 成功，1 被 App 拒绝（比如内容太长），2 用法或输入有误，3 连不上 App。
+
+文字支持几个行首标记，用来排小票：
+
+| 写法 | 效果 |
+|---|---|
+| `# 标题` | 大号粗体，居中 |
+| `## 文字` | 粗体 |
+| `> 文字` | 小字 |
+| `^ 文字` | 居中，可以叠在别的标记前面：`^ > 谢谢惠顾` |
+| `---` / `===` | 虚线 / 实线 |
+| `左<Tab>右` | 两栏，右栏靠右，适合写价格 |
+
+不想解析标记就加 `--plain`，文字会原样印出来。一张纸最高约 1400 点，印不下会报错，不会截断。
+
+### Claude Code 会话小票
+
+[`integrations/claude-code/notchfax-receipt.py`](integrations/claude-code/notchfax-receipt.py) 是一个 Claude Code 的 SessionEnd hook：会话结束时，按转录里的 token 用量和 API 标价算出这次花了多少钱，印成一张小票（分模型列出输入、输出、缓存读写，含子代理）。放到稳定的位置，再加进 `~/.claude/settings.json`：
+
+```json
+"hooks": {
+  "SessionEnd": [
+    {"hooks": [{"type": "command", "command": "/usr/bin/python3 /path/to/notchfax-receipt.py", "timeout": 5}]}
+  ]
+}
+```
+
+默认只给有人在场的会话出小票（终端、桌面 App、IDE），`claude -p` 和 SDK 驱动的自动任务不出。同一个会话再次结束时只结新增的部分。用环境变量调整：`NOTCHFAX_RECEIPT_ENTRYPOINTS`（哪些入口出小票，`*` 为全部）、`NOTCHFAX_RECEIPT_MIN_USD`（低于这个数不打，默认 0.01）、`NOTCHFAX_RECEIPT_CNY_RATE`（顺便折成人民币）。先看看会印什么：
+
+```sh
+python3 integrations/claude-code/notchfax-receipt.py --transcript ~/.claude/projects/<项目>/<会话>.jsonl --dry-run
+```
+
 ## 从源码构建
 
 需要 macOS 14 以上、Xcode（Swift 6）和 [XcodeGen](https://github.com/yonaskolb/XcodeGen)。没有第三方依赖。
@@ -56,6 +105,8 @@ Packages/NotchfaxKit/
   Sources/Memories/       那年今日
   Sources/PhotoBooth/     大头贴
   Sources/FaxKit/         传真客户端
+  Sources/RemotePrint/    命令行打印：notchfax 命令、App 里的接收端、小票排版
+integrations/claude-code/ Claude Code 会话结束时打印花费小票的 hook
 server/                   传真中继服务器（Cloudflare Workers，见 server/README.md）
 docs/protocol.md          传真协议
 scripts/make-icon.swift   生成应用图标
@@ -114,3 +165,4 @@ $APP --fax-profile bob
 - **声音和触感**：声音全部程序合成，波形有单元测试，但没有人坐在这台机器前认真听过；触感需要带力度触控板的机器。
 - **线上服务器**：只连过本地 `wrangler dev`，没有部署过。
 - **签名与公证**：本地构建是 ad-hoc 签名，没有做过分发。
+- **「安装命令行工具…」**：要弹管理员密码框，只验证过拼出来的命令，没有点过一次完整流程；`notchfax` 命令本身和 Claude Code 小票 hook 都实际跑过。

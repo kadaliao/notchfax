@@ -1,8 +1,15 @@
 import AppKit
 import PrintKit
+import RemotePrint
+
+let arguments = CommandLine.arguments
+
+// Run as `notchfax` (or with a command such as `print`): the command line, never the app.
+if CommandLineTool.handles(arguments) {
+    exit(CommandLineTool.run(arguments))
+}
 
 let application = NSApplication.shared
-let arguments = CommandLine.arguments
 
 // `--render-gallery <dir>`: draw every paper type to PNG offscreen, then exit.
 if let index = arguments.firstIndex(of: "--render-gallery") {

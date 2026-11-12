@@ -41,6 +41,8 @@ targets:
         product: PhotoBooth
       - package: NotchfaxKit
         product: FaxKit
+      - package: NotchfaxKit
+        product: RemotePrint
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.kadaliao.notchfax

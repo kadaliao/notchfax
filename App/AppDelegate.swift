@@ -3,6 +3,7 @@ import FaxKit
 import Memories
 import PhotoBooth
 import PrintKit
+import RemotePrint
 import ServiceManagement
 
 /// Command-line switches for development.
@@ -73,6 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             MemoriesFeature(printer: printer),
             PhotoBoothFeature(printer: printer),
             FaxFeature(printer: printer),
+            RemotePrintFeature(printer: printer),
         ]
 
         installStatusItem()
@@ -124,6 +126,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .separator,
             .action("静音", systemImage: "speaker.slash", isOn: printer.isMuted) { [weak self] in self?.toggleMute() },
             .action("登录时启动", isOn: SMAppService.mainApp.status == .enabled) { [weak self] in self?.toggleLaunchAtLogin() },
+            .action("安装命令行工具…", isOn: CommandLineInstaller.isInstalled) { [weak self] in self?.installCommandLineTool() },
             .separator,
             .action("退出 Notchfax") { NSApp.terminate(nil) },
         ]
@@ -152,6 +155,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let alert = NSAlert()
             alert.messageText = "无法更改登录时启动"
             alert.informativeText = error.localizedDescription
+            alert.addButton(withTitle: "好")
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
+    }
+
+    private func installCommandLineTool() {
+        Task {
+            // Off the main actor: it waits for the administrator password dialog.
+            let result = await Task.detached {
+                Result { () throws(CommandLineInstaller.Failure) -> Bool in try CommandLineInstaller.install() }
+            }.value
+            let alert = NSAlert()
+            switch result {
+            case .success(false):
+                return
+            case .success(true):
+                alert.messageText = "命令行工具已安装"
+                alert.informativeText = "在终端里试试：\n\nnotchfax print 你好\n\n用 notchfax help 查看全部用法。"
+            case .failure(let error):
+                alert.messageText = "没能安装命令行工具"
+                alert.informativeText = "\(error.message)\n\n也可以自己建一个链接：\nln -s \"\(Bundle.main.executablePath ?? "")\" \(CommandLineInstaller.linkPath)"
+            }
             alert.addButton(withTitle: "好")
             NSApp.activate(ignoringOtherApps: true)
             alert.runModal()
