@@ -138,8 +138,8 @@ sheet is then dropped on another app, `.draggedOut` follows and is the outcome.
 | Grab and move a little | Swings from the slot with resistance, bends below the hand, springs back | Same, stiffer |
 | Rip sideways, or pull hard | A tear starts at the far edge and travels across with the pointer; a stub is left under the slot and retracts. `.torn` is sent when the tear is complete | Slips out of the slot into the hand |
 | Let go part-way through a tear | Past half way it finishes by itself. Before that it hangs by what is left, and gives way after a couple of seconds | — |
-| Let go of a loose sheet (including a throw) | Flutters down and fades. Never creates a file | Drifts back to the slot and is gripped again |
-| Carry it well away from the slot **and slow down or stop** | Becomes a real PNG file drag (`.draggedOut` if a target accepts it; otherwise it falls away) | Same; if nothing accepts it, it returns to the slot |
+| Let go of a loose sheet (including a throw) | Flutters down and fades. Never creates a file | Near the slot, or thrown: drifts back to the slot and is gripped again. Put down well away from the slot: saved to the Desktop as a PNG, the sheet settles and fades (`.draggedOut`) |
+| Carry it well away from the slot **and slow down or stop** | Becomes a real PNG file drag (`.draggedOut` if a target accepts it; otherwise it falls away) | Same; if nothing accepts it, it is saved to the Desktop |
 | Click | `.tapped` | `.tapped` |
 | Leave it alone | Retracts after `autoRetract` | Same |
 

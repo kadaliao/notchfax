@@ -381,6 +381,10 @@ final class Stage: NSObject, SheetHost {
         return true
     }
 
+    func saveToDesktop(_ file: URL) -> URL? {
+        ExportStore.desktop.flatMap { ExportStore.copy(file, into: $0) }
+    }
+
     fileprivate func dragSessionEnded(operation: NSDragOperation) {
         guard let controller = dragSessionOwner else { return }
         dragSessionOwner = nil

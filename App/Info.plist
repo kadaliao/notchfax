@@ -28,6 +28,8 @@
 	<string>Notchfax 需要使用摄像头来拍大头贴。照片只保存在这台 Mac 上。</string>
 	<key>NSCameraUseContinuityCameraDeviceType</key>
 	<true/>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>把照片放到桌面上时，Notchfax 会把它存成桌面上的一个图片文件。</string>
 	<key>NSHumanReadableCopyright</key>
 	<string></string>
 	<key>NSPhotoLibraryUsageDescription</key>

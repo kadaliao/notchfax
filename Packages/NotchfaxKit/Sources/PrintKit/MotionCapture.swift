@@ -234,6 +234,8 @@ final class OffscreenHost: SheetHost {
     var controllers: [SheetController] = []
     var pointer: CGPoint? { didSet { updatePointer() } }
     private(set) var dragSessionRequested = false
+    /// Files a sheet asked to keep on the Desktop. Nothing is written.
+    private(set) var savedToDesktop: [URL] = []
     private let pointerLayer = CAShapeLayer()
 
     init(size: CGSize, reduceMotion: Bool) {
@@ -264,6 +266,11 @@ final class OffscreenHost: SheetHost {
     func beginDragSession(for controller: SheetController) -> Bool {
         dragSessionRequested = true
         return false
+    }
+
+    func saveToDesktop(_ file: URL) -> URL? {
+        savedToDesktop.append(file)
+        return file
     }
 
     private func updatePointer() {

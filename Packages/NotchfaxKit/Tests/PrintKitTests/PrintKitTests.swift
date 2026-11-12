@@ -325,6 +325,7 @@ private typealias Spring = PrintKit.Spring
         var requestedFileDrag = false
         var phase: SheetController.Phase = .gone
         var slotFreed = false
+        var savedToDesktop: [URL] = []
     }
 
     /// Prints `paper`, waits for it to hang, plays `gesture`, then keeps simulating for `after` seconds.
@@ -358,7 +359,7 @@ private typealias Spring = PrintKit.Spring
             }
             time += dt
         }
-        return Result(events: events, requestedFileDrag: host.dragSessionRequested, phase: controller.phase, slotFreed: controller.slotFreed)
+        return Result(events: events, requestedFileDrag: host.dragSessionRequested, phase: controller.phase, slotFreed: controller.slotFreed, savedToDesktop: host.savedToDesktop)
     }
 
     @Test func `a printed sheet feeds out and comes to rest hanging`() {
@@ -409,6 +410,41 @@ private typealias Spring = PrintKit.Spring
     @Test func `carrying a sheet far away and holding it still starts a file drag`() {
         let result = simulate(.glossyPhoto, gesture: "carry-out", after: 2)
         #expect(result.requestedFileDrag)
+    }
+
+    @Test func `cut paper put down away from the machine is saved to the Desktop and goes`() throws {
+        let result = simulate(.glossyPhoto, gesture: "carry-out", after: 3)
+        let saved = try #require(result.savedToDesktop.first)
+        #expect(result.savedToDesktop.count == 1)
+        #expect(result.events == [.startedFeeding, .finishedFeeding, .draggedOut(saved)])
+        #expect(result.phase == .gone)
+        #expect(result.slotFreed)
+    }
+
+    @Test func `cut paper let go near the machine is not saved`() {
+        let result = simulate(.glossyPhoto, gesture: "carry", after: 3.5)
+        #expect(result.savedToDesktop.isEmpty)
+    }
+
+    @Test func `torn thermal paper dropped far away is never saved`() {
+        let result = simulate(.thermal, gesture: "fling", after: 3)
+        #expect(result.savedToDesktop.isEmpty)
+    }
+
+    @Test func `a copy takes the file's name, and a number when that name is taken`() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("notchfax-test-\(UUID().uuidString)", isDirectory: true)
+        let target = folder.appendingPathComponent("desktop", isDirectory: true)
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let file = folder.appendingPathComponent("大头贴 2026-11-12 10.00.00.png")
+        try Data([1, 2, 3]).write(to: file)
+
+        let first = try #require(ExportStore.copy(file, into: target))
+        let second = try #require(ExportStore.copy(file, into: target))
+        #expect(first.lastPathComponent == "大头贴 2026-11-12 10.00.00.png")
+        #expect(second.lastPathComponent == "大头贴 2026-11-12 10.00.00 2.png")
+        #expect(try Data(contentsOf: second) == Data([1, 2, 3]))
+        #expect(ExportStore.copy(file, into: folder.appendingPathComponent("missing")) == nil)
     }
 
     @Test func `with reduced motion a sheet fades in and a tear fades out`() {

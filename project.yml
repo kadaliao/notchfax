@@ -29,6 +29,7 @@ targets:
         LSApplicationCategoryType: public.app-category.utilities
         NSCameraUseContinuityCameraDeviceType: true
         NSCameraUsageDescription: Notchfax 需要使用摄像头来拍大头贴。照片只保存在这台 Mac 上。
+        NSDesktopFolderUsageDescription: 把照片放到桌面上时，Notchfax 会把它存成桌面上的一个图片文件。
         NSPhotoLibraryUsageDescription: Notchfax 需要读取照片图库，为你打印“那年今日”的照片。照片不会离开这台 Mac。
         NSHumanReadableCopyright: ""
     dependencies:

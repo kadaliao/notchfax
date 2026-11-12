@@ -16,6 +16,8 @@ protocol SheetHost: AnyObject {
     func haptic(_ pattern: NSHapticFeedbackManager.FeedbackPattern)
     /// Starts a system file drag for the sheet. Returns false if that is not possible.
     func beginDragSession(for controller: SheetController) -> Bool
+    /// Copies an exported sheet to the user's Desktop. Returns the new file, or nil if it could not be written.
+    func saveToDesktop(_ file: URL) -> URL?
 }
 
 /// Drives one sheet of paper from the moment it starts to feed until it is gone:
@@ -30,6 +32,8 @@ final class SheetController {
         /// Drawn back into the slot to make room, and waiting there to come out again.
         case stowing, stowed
         case tearing, freeHeld, dragSession, returning, falling
+        /// Put down away from the machine: it comes to rest, then is gone, saved as this file.
+        case settling(URL)
         case fadingIn
         case fadingOut(PrintOutcome?)
         case gone
@@ -131,6 +135,7 @@ final class SheetController {
     private var carryDwell: TimeInterval = 0
     private var returnX = Spring(), returnY = Spring(), returnAngle = Spring()
     private var fallAngle = 0.0, fallSpin = 0.0, fallTime: TimeInterval = 0
+    private var settleTime: TimeInterval = 0
 
     // Tearing.
     private var tear: Tear?
@@ -226,7 +231,7 @@ final class SheetController {
 
     private var isFree: Bool {
         switch phase {
-        case .freeHeld, .dragSession, .returning, .falling: true
+        case .freeHeld, .dragSession, .returning, .falling, .settling: true
         default: false
         }
     }
@@ -252,7 +257,7 @@ final class SheetController {
             )
         case .freeHeld, .dragSession:
             return SheetPose(pivotLocal: freePivot, pivotStage: pos, angle: pendulum.angle)
-        case .returning:
+        case .returning, .settling:
             return SheetPose(pivotLocal: freePivot, pivotStage: pos, angle: returnAngle.value)
         case .falling:
             return SheetPose(pivotLocal: freePivot, pivotStage: pos, angle: fallAngle)
@@ -266,7 +271,7 @@ final class SheetController {
         bend.lift = lift.value * 9
         bend.tip = tipCurl
         switch phase {
-        case .freeHeld, .dragSession, .returning, .falling:
+        case .freeHeld, .dragSession, .returning, .falling, .settling:
             bend.holdY = freePivot.y
             bend.lagBelow = lagBelow.value
             bend.lagAbove = lagAbove.value
@@ -319,7 +324,7 @@ final class SheetController {
     /// A sheet with no interaction and no actions is scenery: it never takes the mouse.
     private var isTouchable: Bool {
         switch phase {
-        case .gone, .dragSession, .fadingOut, .inserting, .stowing, .stowed: return false
+        case .gone, .dragSession, .settling, .fadingOut, .inserting, .stowing, .stowed: return false
         default: return !job.interaction.isEmpty || !job.actions.isEmpty
         }
     }
@@ -432,6 +437,14 @@ final class SheetController {
             lift.step(to: 1.5, response: 0.3, damping: 1, dt: dt)
             if fallTime > 0.22 { node.opacity -= dt / 0.4 }
             if node.opacity <= 0.001 { finish(.torn) }
+        case .settling(let url):
+            // Laid flat where it was let go; once it is still, the file on the Desktop is all that is left.
+            settleTime += dt
+            vel = .zero
+            returnAngle.step(to: 0, response: 0.3, damping: 0.8, dt: dt)
+            lift.step(to: 0, response: 0.25, damping: 1, dt: dt)
+            if settleTime > 0.3 { node.opacity -= dt / 0.28 }
+            if node.opacity <= 0.001 { finish(.draggedOut(url)) }
         case .fadingIn:
             node.opacity += dt / 0.32
             if node.opacity >= 0.999 {
@@ -460,7 +473,7 @@ final class SheetController {
         let rect = node.paperRect
         var lagTargetBelow = 0.0, lagTargetAbove = 0.0, curlTarget = restCurl
         switch phase {
-        case .freeHeld, .returning, .falling:
+        case .freeHeld, .returning, .falling, .settling:
             let below = Double(rect.maxY - freePivot.y), above = Double(freePivot.y - rect.minY)
             // Air resists the moving sheet: both free ends trail behind the hand.
             let drag = -Double(vel.dx) * 0.03
@@ -669,6 +682,8 @@ final class SheetController {
         grab = nil
         motor = nil
         if phase == .stowed { return finish(.cancelled) }
+        // Already saved: the file stays, only the sheet goes.
+        if case .settling(let url) = phase { return finish(.draggedOut(url)) }
         phase = .fadingOut(.cancelled)
         host.sheetStateDidChange()
     }
@@ -794,7 +809,13 @@ final class SheetController {
         if phase == .tearing, let progress = tear?.progress, progress >= 0.5 { tear?.finishesAlone = true }
         if phase == .freeHeld {
             let v = velocity(of: g, now: time)
-            if isTorn { beginFalling(velocity: v) } else { beginReturning(velocity: v) }
+            if isTorn {
+                beginFalling(velocity: v)
+            } else if isAwayFromMachine, hypot(v.dx, v.dy) < 600 {
+                setDown(velocity: v)
+            } else {
+                beginReturning(velocity: v)
+            }
         }
         idle = 0
         host.sheetStateDidChange()
@@ -1032,10 +1053,7 @@ final class SheetController {
     /// and then slowed down, as one does when aiming at a destination. A fling never qualifies.
     private func tickCarry(_ dt: TimeInterval) {
         guard grab != nil, job.interaction.contains(.dragOut) else { return }
-        let home = CGPoint(x: anchor.x, y: anchor.y + h / 2)
-        let radius = max(260, h * 0.75 + 150)
-        let outside = hypot(cursor.x - home.x, cursor.y - home.y) > radius
-        if outside, smoothedSpeed < 260 {
+        if isAwayFromMachine, smoothedSpeed < 260 {
             carryDwell += dt
         } else {
             carryDwell = 0
@@ -1044,6 +1062,30 @@ final class SheetController {
             carryDwell = 0
             if !host.beginDragSession(for: self) { carryDwell = -1 }
         }
+    }
+
+    /// The pointer has carried the sheet out of the zone around the machine.
+    private var isAwayFromMachine: Bool {
+        let home = CGPoint(x: anchor.x, y: anchor.y + h / 2)
+        let radius = max(260, h * 0.75 + 150)
+        return hypot(cursor.x - home.x, cursor.y - home.y) > radius
+    }
+
+    /// Cut paper put down away from the machine is kept: it is saved to the Desktop and
+    /// the sheet comes to rest where it was let go. A throw, or a release near the slot,
+    /// still sends it back.
+    private func setDown(velocity: CGVector) {
+        guard job.interaction.contains(.dragOut), let file = exportFileURL(), let saved = host.saveToDesktop(file) else {
+            return beginReturning(velocity: velocity)
+        }
+        returnAngle = Spring(value: pendulum.angle, velocity: pendulum.omega)
+        settleTime = 0
+        node.opacity = 1
+        phase = .settling(saved)
+        host.sound.play(.slip)
+        host.haptic(.alignment)
+        handle?.emit(.draggedOut(saved))
+        host.requestFrames()
     }
 
     /// The file handed to a drag session. Falls back to the sheet as printed if the
@@ -1081,7 +1123,14 @@ final class SheetController {
         pendulum = Pendulum()
         node.opacity = 1
         phase = .freeHeld
-        if isTorn { beginFalling(velocity: .zero) } else { beginReturning(velocity: .zero) }
+        if isTorn {
+            beginFalling(velocity: .zero)
+        } else if isAwayFromMachine {
+            // Nothing took the file where it was dropped: keep it on the Desktop instead.
+            setDown(velocity: .zero)
+        } else {
+            beginReturning(velocity: .zero)
+        }
         host.requestFrames()
     }
 
@@ -1145,6 +1194,31 @@ enum ExportStore {
         } catch {
             return nil
         }
+    }
+
+    /// Copies `file` into `folder` under its own name, adding a number if that name is taken.
+    static func copy(_ file: URL, into folder: URL) -> URL? {
+        let manager = FileManager.default
+        let base = file.deletingPathExtension().lastPathComponent
+        let ext = file.pathExtension
+        for attempt in 1...999 {
+            let name = attempt == 1 ? base : "\(base) \(attempt)"
+            let target = folder.appendingPathComponent(name).appendingPathExtension(ext)
+            if manager.fileExists(atPath: target.path) { continue }
+            do {
+                try manager.copyItem(at: file, to: target)
+                return target
+            } catch CocoaError.fileWriteFileExists {
+                continue
+            } catch {
+                return nil
+            }
+        }
+        return nil
+    }
+
+    static var desktop: URL? {
+        FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
     }
 
     /// Removes exports left over from earlier runs.
