@@ -75,7 +75,7 @@ scripts/make-icon.swift   生成应用图标
 | `--welcome` | 再印一次首次启动的小票 |
 | `--quit-after <秒>` | 到时间自动退出 |
 | `--memories-sample` / `--memories-demo` | 那年今日改用程序生成的样张图库；`-demo` 还会在启动时打印 |
-| `--photobooth-simulated` / `--photobooth-demo` / `--photobooth-look color\|mono\|warm` | 大头贴用模拟画面；启动即开拍；指定滤镜 |
+| `--photobooth-simulated` / `--photobooth-demo` / `--photobooth-look cartoon\|comic\|sketch\|pop\|dreamy\|instant\|warm\|cool\|mono\|color` | 大头贴用模拟画面；启动即开拍；指定滤镜 |
 | `--fax-server <网址>` | 这次运行使用的传真服务器 |
 | `--fax-profile <名字>` | 独立的传真身份和本地数据，用来在一台 Mac 上开两个实例互发 |
 | `--fax-debug-…` | 无人值守的端到端脚本，见 `Sources/FaxKit/Debug/FaxDebugRunner.swift` |

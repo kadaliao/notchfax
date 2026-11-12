@@ -44,6 +44,8 @@ struct ViewfinderView: View {
                 .overlay(alignment: .topLeading) {
                     CloseButton(action: close).padding(8)
                 }
+            looks
+                .frame(width: Self.previewWidth, height: 24)
             controls
                 .frame(width: Self.previewWidth, height: 38)
         }
@@ -64,12 +66,20 @@ struct ViewfinderView: View {
         }
     }
 
-    @ViewBuilder private var controls: some View {
+    @ViewBuilder private var looks: some View {
         switch model.stage {
         case .live(let session):
-            BoothControls(session: session, look: Binding(get: { model.look }, set: { model.look = $0; session.look = $0 }))
+            LookPicker(look: Binding(get: { model.look }, set: { model.look = $0; session.look = $0 }))
+                .disabled(session.phase == .developing || session.phase == .finished)
         default:
-            BoothControls(session: nil, look: Binding(get: { model.look }, set: { model.look = $0 }))
+            LookPicker(look: Binding(get: { model.look }, set: { model.look = $0 }))
+        }
+    }
+
+    @ViewBuilder private var controls: some View {
+        switch model.stage {
+        case .live(let session): BoothControls(session: session)
+        default: BoothControls(session: nil)
         }
     }
 }
@@ -253,15 +263,12 @@ private struct CloseButton: View {
 
 private struct BoothControls: View {
     let session: BoothSession?
-    @Binding var look: BoothLook
 
     private var phase: BoothSession.Phase { session?.phase ?? .starting }
 
     var body: some View {
         ZStack {
             HStack(spacing: 0) {
-                LookPicker(look: $look)
-                    .disabled(phase == .developing || phase == .finished)
                 Spacer(minLength: 0)
                 FrameSlots(thumbnails: session?.thumbnails ?? [], current: phase.shot, total: session?.script.shots ?? 4)
             }
@@ -272,35 +279,70 @@ private struct BoothControls: View {
     }
 }
 
+/// The row of looks under the picture: more than fit, so it scrolls, and ← → step through them.
 private struct LookPicker: View {
     @Binding var look: BoothLook
     @Environment(\.isEnabled) private var isEnabled
+    @Namespace private var namespace
 
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(BoothLook.allCases) { option in
-                Button {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 1)) { look = option }
-                } label: {
-                    Text(option.title)
-                        .font(.system(size: 10.5, weight: look == option ? .semibold : .medium))
-                        .foregroundStyle(.white.opacity(look == option ? 0.95 : 0.5))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 4)
-                        .background {
-                            if look == option {
-                                Capsule().fill(.white.opacity(0.15)).matchedGeometryEffect(id: "selection", in: namespace)
-                            }
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 2) {
+                    ForEach(BoothLook.allCases) { option in
+                        Button {
+                            select(option)
+                        } label: {
+                            Text(option.title)
+                                .font(.system(size: 10.5, weight: look == option ? .semibold : .medium))
+                                .foregroundStyle(.white.opacity(look == option ? 0.95 : 0.5))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background {
+                                    if look == option {
+                                        Capsule().fill(.white.opacity(0.15)).matchedGeometryEffect(id: "selection", in: namespace)
+                                    }
+                                }
+                                .contentShape(Capsule())
                         }
-                        .contentShape(Capsule())
+                        .buttonStyle(.plain)
+                        .id(option)
+                        .accessibilityAddTraits(look == option ? .isSelected : [])
+                    }
                 }
-                .buttonStyle(.plain)
+                .padding(.horizontal, 10)
+            }
+            // The row fades out at both ends, which is what says there is more to either side.
+            .mask {
+                LinearGradient(
+                    stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.06), .init(color: .black, location: 0.94), .init(color: .clear, location: 1)],
+                    startPoint: .leading, endPoint: .trailing
+                )
+            }
+            .onAppear { proxy.scrollTo(look, anchor: .center) }
+            .onChange(of: look) {
+                withAnimation(.spring(response: 0.3, dampingFraction: 1)) { proxy.scrollTo(look, anchor: .center) }
             }
         }
+        .background {
+            // Hidden twins so the arrow keys step through the looks.
+            Button("") { step(-1) }.keyboardShortcut(.leftArrow, modifiers: []).opacity(0)
+            Button("") { step(1) }.keyboardShortcut(.rightArrow, modifiers: []).opacity(0)
+        }
         .opacity(isEnabled ? 1 : 0.5)
+        .accessibilityLabel("滤镜")
+        .help("滤镜（← →）")
     }
 
-    @Namespace private var namespace
+    private func select(_ option: BoothLook) {
+        withAnimation(.spring(response: 0.3, dampingFraction: 1)) { look = option }
+    }
+
+    private func step(_ by: Int) {
+        let all = BoothLook.allCases
+        guard let index = all.firstIndex(of: look) else { return }
+        select(all[(index + by + all.count) % all.count])
+    }
 }
 
 /// Four little frames that fill in as the shots are taken.

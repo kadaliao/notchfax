@@ -8,7 +8,7 @@ import PrintKit
 /// Launch arguments, for development:
 /// - `--photobooth-simulated`: use the stand-in camera even if a real one exists.
 /// - `--photobooth-demo`: open the booth at launch and start shooting.
-/// - `--photobooth-look color|mono|warm`: the look to start with.
+/// - `--photobooth-look cartoon|comic|sketch|…`: the look to start with (a `BoothLook` raw value).
 ///
 /// Shortcut: ⌃⌥⌘B opens the booth from anywhere.
 @MainActor
@@ -23,7 +23,9 @@ public final class PhotoBoothFeature: FeatureModule {
     private var model: BoothViewModel?
     private var session: BoothSession?
 
-    private static let lookKey = "photobooth.look"
+    /// Not "photobooth.look": that key always held a value from before there was a styled
+    /// default, and would keep every existing booth on plain colour.
+    private static let lookKey = "photobooth.filter"
     private static let cameraPrivacy = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera")
 
     struct LaunchOptions {
@@ -74,7 +76,7 @@ public final class PhotoBoothFeature: FeatureModule {
     }
 
     private var look: BoothLook {
-        get { options.look ?? UserDefaults.standard.string(forKey: Self.lookKey).flatMap(BoothLook.init) ?? .color }
+        get { options.look ?? UserDefaults.standard.string(forKey: Self.lookKey).flatMap(BoothLook.init) ?? .standard }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: Self.lookKey) }
     }
 

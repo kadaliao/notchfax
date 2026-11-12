@@ -156,7 +156,7 @@ public final class BoothSession {
         source: any FrameSource,
         pipeline: FramePipeline,
         sink: PreviewSink,
-        look: BoothLook = .color,
+        look: BoothLook = .standard,
         script: BoothScript = BoothScript(),
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     ) {

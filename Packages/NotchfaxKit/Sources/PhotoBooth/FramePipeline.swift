@@ -22,7 +22,7 @@ public final class FramePipeline: Sendable {
 
     private struct State {
         var latest: CIImage?
-        var look: BoothLook = .color
+        var look: BoothLook = .standard
         var displayPending = false
         var frameCount = 0
     }
