@@ -13,9 +13,11 @@ It needs the `notchfax` command (Notchfax menu: 安装命令行工具…). The h
 and does the work in a detached process, because Claude Code gives SessionEnd hooks only a
 moment and the transcript can lag behind by a beat.
 
-Try it by hand on any transcript:
+By hand, for a session that is still going (prints the bill so far right away; the receipt
+at the end of the session still bills the whole thing):
 
-    notchfax-receipt.py --transcript ~/.claude/projects/<project>/<session>.jsonl --dry-run
+    notchfax-receipt.py --session <session id>        # or --transcript <path.jsonl>
+    notchfax-receipt.py --session <session id> --dry-run    # only show it in the terminal
 
 Settings (environment variables):
 
@@ -311,9 +313,11 @@ def clip(text, limit):
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def render(summary, session_id, cwd, already_paid):
+def render(summary, session_id, cwd, already_paid, interim=False):
+    """`interim`: the session is still going; the bill is up to now."""
     local = lambda t: t.astimezone().strftime("%m-%d %H:%M")
-    lines = ["# CLAUDE CODE", "^ > 会话小票 No.%s" % (session_id or "")[:8].upper(), "---"]
+    kind = "对账单" if interim else "会话小票"
+    lines = ["# CLAUDE CODE", "^ > %s No.%s" % (kind, (session_id or "")[:8].upper()), "---"]
     project = os.path.basename((cwd or summary.cwd or "").rstrip("/"))
     if project:
         lines.append("项目\t%s" % clip(project, 18))
@@ -321,7 +325,7 @@ def render(summary, session_id, cwd, already_paid):
         lines.append("标题\t%s" % clip(summary.title, 24))
     if summary.first and summary.last:
         lines.append("开始\t%s" % local(summary.first))
-        lines.append("结束\t%s" % local(summary.last))
+        lines.append("%s\t%s" % ("截至" if interim else "结束", local(summary.last)))
         lines.append("用时\t%s" % duration((summary.last - summary.first).total_seconds()))
     lines.append("对话\t%d 问 · %d 次调用" % (summary.prompts, summary.requests))
     if summary.tool_calls:
@@ -425,43 +429,64 @@ def wanted(entrypoint):
     return "*" in names or (entrypoint or "") in names
 
 
-def run(hook, dry_run):
+HOOK, NOW, DRY_RUN = "hook", "now", "dry-run"
+
+
+def run(hook, mode, interim):
+    """`mode`: HOOK (the session ended), NOW (someone asked for the bill so far) or DRY_RUN.
+    `interim`: the session is still going."""
+    def report(message):
+        # A hook has nobody watching; a person asking by hand should see what went wrong.
+        if mode == HOOK:
+            log(message)
+        else:
+            sys.stderr.write(message + "\n")
+        return 0 if mode == HOOK else 1
+
     transcript = hook.get("transcript_path")
     if not transcript or not os.path.exists(transcript):
-        log("no transcript: %r" % transcript)
-        return 0
+        return report("no transcript: %r" % transcript)
     session_id = hook.get("session_id") or os.path.splitext(os.path.basename(transcript))[0]
     summary = summarize(transcript)
     entrypoint = os.environ.get("CLAUDE_CODE_ENTRYPOINT") or summary.entrypoint
-    if not dry_run and not wanted(entrypoint):
+    if mode == HOOK and not wanted(entrypoint):
         return 0
 
     state = load_state()
     paid = float((state.get(session_id) or {}).get("total", 0.0))
     due = summary.total - paid
     minimum = float(os.environ.get("NOTCHFAX_RECEIPT_MIN_USD", "0.01") or 0)
-    text = render(summary, session_id, hook.get("cwd"), paid)
-    if dry_run:
+    text = render(summary, session_id, hook.get("cwd"), paid, interim=interim)
+    if mode != HOOK:
         print(text)
+    if mode == DRY_RUN:
         return 0
-    if summary.requests == 0 or due < minimum:
+    if mode == HOOK and (summary.requests == 0 or due < minimum):
         return 0
 
     notchfax = find_notchfax()
     if not notchfax:
-        log("notchfax command not found; install it from the Notchfax menu (安装命令行工具…)")
-        return 0
-    name = "Claude Code 小票 %s" % (session_id or "")[:8]
+        return report("notchfax command not found; install it from the Notchfax menu (安装命令行工具…)")
+    name = "Claude Code %s %s" % ("小票" if mode == HOOK else "对账单", (session_id or "")[:8])
     result = subprocess.run(
         [notchfax, "print", "--quiet", "--name", name],
         input=text.encode("utf-8"), stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60,
     )
     if result.returncode != 0:
-        log("notchfax print failed (%d): %s" % (result.returncode, result.stderr.decode("utf-8", "replace").strip()))
-        return 0
-    state[session_id] = {"total": round(summary.total, 6), "at": int(time.time())}
-    save_state(state)
+        return report("notchfax print failed (%d): %s" % (result.returncode, result.stderr.decode("utf-8", "replace").strip()))
+    if mode == HOOK:
+        # Only a session's end settles the bill; a receipt asked for mid-session is just a look.
+        state[session_id] = {"total": round(summary.total, 6), "at": int(time.time())}
+        save_state(state)
+    else:
+        print("\n已送去 Notchfax 打印。")
     return 0
+
+
+def find_transcript(session_id):
+    pattern = os.path.join(os.path.expanduser("~/.claude/projects"), "*", session_id + ".jsonl")
+    matches = sorted(glob.glob(pattern), key=os.path.getmtime)
+    return matches[-1] if matches else None
 
 
 def detach():
@@ -475,14 +500,24 @@ def detach():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Print a Claude Code session's cost on Notchfax.")
-    parser.add_argument("--transcript", help="a session transcript (.jsonl) instead of hook input on stdin")
-    parser.add_argument("--dry-run", action="store_true", help="write the receipt to stdout instead of printing it")
-    parser.add_argument("--foreground", action="store_true", help="do not detach (for debugging)")
+    parser = argparse.ArgumentParser(
+        description="Print a Claude Code session's cost on Notchfax. With no arguments it reads "
+        "SessionEnd hook input on stdin; with --session or --transcript it prints the bill so far, now."
+    )
+    parser.add_argument("--session", help="a session id; its transcript is looked up under ~/.claude/projects")
+    parser.add_argument("--transcript", help="a session transcript (.jsonl)")
+    parser.add_argument("--dry-run", action="store_true", help="only write the receipt to stdout")
+    parser.add_argument("--foreground", action="store_true", help="hook mode: do not detach (for debugging)")
     args = parser.parse_args()
 
-    if args.transcript:
-        hook = {"transcript_path": os.path.expanduser(args.transcript)}
+    interim = bool(args.session or args.transcript)
+    if interim:
+        transcript = os.path.expanduser(args.transcript) if args.transcript else find_transcript(args.session)
+        if not transcript:
+            sys.stderr.write("找不到会话 %s 的记录。\n" % args.session)
+            return 1
+        hook = {"transcript_path": transcript, "session_id": args.session}
+        mode = DRY_RUN if args.dry_run else NOW
     else:
         try:
             hook = json.load(sys.stdin)
@@ -490,14 +525,16 @@ def main():
             return 0
         if not isinstance(hook, dict):
             return 0
-
-    if not args.dry_run and not args.foreground:
-        detach()
-        # The last turn may still be on its way to the transcript.
-        time.sleep(1.5)
+        mode = DRY_RUN if args.dry_run else HOOK
+        if mode == HOOK and not args.foreground:
+            detach()
+            # The last turn may still be on its way to the transcript.
+            time.sleep(1.5)
     try:
-        return run(hook, args.dry_run)
+        return run(hook, mode, interim)
     except Exception:
+        if mode != HOOK:
+            raise
         log(traceback.format_exc().strip())
         return 0
 
