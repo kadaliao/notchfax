@@ -260,9 +260,15 @@ private func eventually(_ timeout: Double = 2, _ condition: @Sendable () async -
 
     @Test func `heartbeats are the exact ping frame and pongs keep the line up`() async {
         let factory = FakeFactory(answersPings: true)
-        let connection = FaxConnection(authority: FakeAuthority(), factory: factory, timing: Self.fast, random: { 0 })
+        // A pong crosses a few tasks and the actor before it counts. On a loaded CI machine that once
+        // took longer than the 0.2 s `fast` allows, so give it 0.6 s here, and then keep watching for
+        // more than twice that: pongs that were ignored would still force a reconnect in that time.
+        var timing = Self.fast
+        timing.heartbeatTimeout = 0.6
+        let connection = FaxConnection(authority: FakeAuthority(), factory: factory, timing: timing, random: { 0 })
         await connection.start()
-        #expect(await eventually { (factory.last?.sent.withLock { $0.count } ?? 0) >= 3 })
+        #expect(await eventually(5) { (factory.last?.sent.withLock { $0.count } ?? 0) >= 3 })
+        try? await Task.sleep(for: .seconds(1.5))
         let sent = factory.last?.sent.withLock { $0 } ?? []
         #expect(sent.allSatisfy { $0 == #"{"type":"ping"}"# })
         #expect(factory.count == 1, "answered pings must not trigger a reconnect")
