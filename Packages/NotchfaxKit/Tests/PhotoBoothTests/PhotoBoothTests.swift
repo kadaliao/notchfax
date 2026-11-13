@@ -233,16 +233,23 @@ private func waitUntil(_ condition: () -> Bool, timeout: Duration = .seconds(5))
     @Test(arguments: BoothLook.allCases.filter(\.hasGrain))
     func grainIsFineAndUnbiased(look: BoothLook) {
         let grey = solid(red: 0.5, green: 0.5, blue: 0.5, width: 400, height: 300)
-        let image = cgImage(look.apply(to: grey, grainSeed: 3).cropped(to: grey.extent))
-        var values: [Double] = []
-        for y in stride(from: 120, to: 180, by: 3) {
-            for x in stride(from: 170, to: 230, by: 3) { values.append(pixel(image, x: x, y: y).r) }
+        func samples(_ picture: CIImage) -> [Double] {
+            let image = cgImage(picture.cropped(to: grey.extent))
+            var values: [Double] = []
+            for y in stride(from: 120, to: 180, by: 3) {
+                for x in stride(from: 170, to: 230, by: 3) { values.append(pixel(image, x: x, y: y).r) }
+            }
+            return values
         }
+        let values = samples(look.apply(to: grey, grainSeed: 3))
         let spread = values.max()! - values.min()!
         #expect(spread < 0.12, "grain spread \(spread)")
+        // The looks move mid-grey on purpose (the system's Instant effect lifts it to about 0.78),
+        // so measure the grain against the same look without it, not against the input.
         let mean = values.reduce(0, +) / Double(values.count)
-        // Some looks move mid-grey on purpose; grain itself must not push it far.
-        #expect(abs(mean - 0.5) < 0.2)
+        let plain = samples(look.graded(grey))
+        let plainMean = plain.reduce(0, +) / Double(plain.count)
+        #expect(abs(mean - plainMean) < 0.02, "grain moved the mean from \(plainMean) to \(mean)")
     }
 
     @Test func blackAndWhiteHasNoColour() {

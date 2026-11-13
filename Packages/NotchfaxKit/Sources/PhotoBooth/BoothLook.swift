@@ -53,6 +53,15 @@ public enum BoothLook: String, CaseIterable, Sendable, Identifiable {
     public func apply(to image: CIImage, grainSeed: Int = 0) -> CIImage {
         let extent = image.extent
         guard extent.width > 1, extent.height > 1, !extent.isInfinite else { return image }
+        let out = graded(image)
+        guard let amount = grainAmount else { return out }
+        return grain(out, amount: amount, seed: grainSeed).cropped(to: extent)
+    }
+
+    /// Everything the look does except the grain, which `apply` lays on last.
+    /// Expects a finite picture larger than a pixel; `apply` checks.
+    func graded(_ image: CIImage) -> CIImage {
+        let extent = image.extent
         var out = image
         switch self {
         case .cartoon:
@@ -114,12 +123,10 @@ public enum BoothLook: String, CaseIterable, Sendable, Identifiable {
             out = out.applyingFilter("CIPhotoEffectInstant")
             out = curve(out, [(0, 0.05), (0.25, 0.26), (0.5, 0.53), (0.75, 0.79), (1, 0.97)])
             out = vignette(out, intensity: 0.6)
-            out = grain(out, amount: 0.07, seed: grainSeed)
         case .cool:
             out = out.applyingFilter("CIPhotoEffectProcess")
             out = colour(out, saturation: 0.95, contrast: 1.04)
             out = vignette(out, intensity: 0.4)
-            out = grain(out, amount: 0.07, seed: grainSeed)
         case .color:
             out = colour(out, saturation: 1.06, contrast: 1.03)
             out = vignette(out, intensity: 0.32)
@@ -127,7 +134,6 @@ public enum BoothLook: String, CaseIterable, Sendable, Identifiable {
             out = colour(out, saturation: 0, contrast: 1.16, brightness: 0.015)
             out = curve(out, [(0, 0.015), (0.25, 0.21), (0.5, 0.50), (0.75, 0.80), (1, 0.985)])
             out = vignette(out, intensity: 0.45)
-            out = grain(out, amount: 0.12, seed: grainSeed)
         case .warm:
             let temperature = CIFilter.temperatureAndTint()
             temperature.inputImage = out
@@ -138,18 +144,22 @@ public enum BoothLook: String, CaseIterable, Sendable, Identifiable {
             // Lifted, slightly warm blacks; highlights that never quite reach white.
             out = curve(out, [(0, 0.06), (0.25, 0.27), (0.5, 0.52), (0.75, 0.76), (1, 0.95)])
             out = vignette(out, intensity: 0.4)
-            out = grain(out, amount: 0.09, seed: grainSeed)
         }
         return out.cropped(to: extent)
     }
 
-    /// Whether the look lays film grain over the picture.
-    var hasGrain: Bool {
+    /// How strong the film grain is, for the looks that have it.
+    var grainAmount: CGFloat? {
         switch self {
-        case .instant, .warm, .cool, .mono: true
-        default: false
+        case .instant, .cool: 0.07
+        case .warm: 0.09
+        case .mono: 0.12
+        default: nil
         }
     }
+
+    /// Whether the look lays film grain over the picture.
+    var hasGrain: Bool { grainAmount != nil }
 
     /// Runs `body` on the picture resampled to `width` and brings the result back to size.
     private func drawn(_ image: CIImage, width: CGFloat = BoothLook.drawingWidth, _ body: (CIImage) -> CIImage) -> CIImage {
