@@ -10,12 +10,19 @@ import SwiftUI
 public final class RemotePrintFeature: FeatureModule {
     private let printer: Printer
     private var server: PrintPortServer?
+    private var agentReceiptPanel: SlotPresentation?
 
     public init(printer: Printer) {
         self.printer = printer
     }
 
     public func start() {
+        if CommandLine.arguments.contains("--debug-agent-receipt") {
+            Task {
+                try? await Task.sleep(for: .milliseconds(900))
+                openAgentReceipt()
+            }
+        }
         let server = PrintPortServer { [weak self] data in
             let reply = self?.handle(data) ?? .rejected("Notchfax 正在退出。")
             return (try? Wire.encode(reply)) ?? Data()
@@ -24,6 +31,32 @@ public final class RemotePrintFeature: FeatureModule {
             self.server = server
         } else {
             NSLog("Notchfax: command-line printing is unavailable, port %@ is taken (another copy running?)", Wire.portName)
+        }
+    }
+
+    /// A panel under the slot with the prompt that sets up AI 会话小票 (see `AgentReceipt`).
+    public func openAgentReceipt() {
+        guard agentReceiptPanel == nil else { return }
+        let executable = CommandLineInstaller.executablePath ?? "/Applications/Notchfax.app/Contents/MacOS/Notchfax"
+        agentReceiptPanel = printer.present(options: .init(
+            chrome: .machine,
+            acceptsKeyboard: true,
+            onDismiss: { [weak self] in self?.agentReceiptPanel = nil }
+        )) { [weak self] presentation in
+            AgentReceiptView(prompt: AgentReceipt.prompt(executable: executable)) {
+                presentation.dismiss()
+                self?.printAgentReceiptSample()
+            } close: {
+                presentation.dismiss()
+            }
+        }
+    }
+
+    private func printAgentReceiptSample() {
+        do {
+            printer.enqueue(try RemoteJobs.job(for: PrintRequest(text: AgentReceipt.sample(endingAt: Date()), name: "Notchfax 样票")))
+        } catch {
+            NSLog("Notchfax: the sample receipt does not fit: %@", error.message)
         }
     }
 

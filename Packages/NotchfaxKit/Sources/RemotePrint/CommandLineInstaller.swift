@@ -9,15 +9,29 @@ public enum CommandLineInstaller {
         public let message: String
     }
 
-    private static var executablePath: String? {
+    static var executablePath: String? {
         Bundle.main.executableURL?.resolvingSymlinksInPath().path
     }
 
-    /// The link exists and leads to this copy of the app.
-    public static var isInstalled: Bool {
-        guard let executablePath,
-              (try? FileManager.default.destinationOfSymbolicLink(atPath: linkPath)) != nil else { return false }
-        return URL(fileURLWithPath: linkPath).resolvingSymlinksInPath().path == executablePath
+    /// Where else a `notchfax` link may already be: Homebrew's cask puts one in its own bin,
+    /// and people who follow the README make one in ~/.local/bin.
+    static var knownLinkPaths: [String] {
+        let name = CommandLineTool.commandName
+        return [linkPath, "/opt/homebrew/bin/\(name)", NSHomeDirectory() + "/.local/bin/\(name)"]
+    }
+
+    /// The first of these links that leads to this copy of the app, if any does.
+    public static var installedPath: String? {
+        executablePath.flatMap { installedPath(among: knownLinkPaths, executable: $0) }
+    }
+
+    public static var isInstalled: Bool { installedPath != nil }
+
+    static func installedPath(among paths: [String], executable: String) -> String? {
+        paths.first { path in
+            (try? FileManager.default.destinationOfSymbolicLink(atPath: path)) != nil
+                && URL(fileURLWithPath: path).resolvingSymlinksInPath().path == executable
+        }
     }
 
     /// Creates or repoints the link. /usr/local/bin usually belongs to root, so this asks for an

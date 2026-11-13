@@ -50,6 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let launch: LaunchOptions
     private let printer = Printer()
     private var features: [any FeatureModule] = []
+    private lazy var remotePrint = RemotePrintFeature(printer: printer)
     private var statusItem: NSStatusItem?
     private lazy var debug = DebugSamples(printer: printer)
 
@@ -74,7 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             MemoriesFeature(printer: printer),
             PhotoBoothFeature(printer: printer),
             FaxFeature(printer: printer),
-            RemotePrintFeature(printer: printer),
+            remotePrint,
         ]
 
         installStatusItem()
@@ -127,6 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .action("静音", systemImage: "speaker.slash", isOn: printer.isMuted) { [weak self] in self?.toggleMute() },
             .action("登录时启动", isOn: SMAppService.mainApp.status == .enabled) { [weak self] in self?.toggleLaunchAtLogin() },
             .action("安装命令行工具…", isOn: CommandLineInstaller.isInstalled) { [weak self] in self?.installCommandLineTool() },
+            .action("AI 会话小票…") { [weak self] in self?.remotePrint.openAgentReceipt() },
             .separator,
             .action("退出 Notchfax") { NSApp.terminate(nil) },
         ]
@@ -162,6 +164,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func installCommandLineTool() {
+        // Homebrew's cask, or an earlier click, already put it on the PATH: just say where.
+        if let path = CommandLineInstaller.installedPath {
+            let alert = NSAlert()
+            alert.messageText = "命令行工具已经装好了"
+            alert.informativeText = "位置：\(path)\n\n在终端里试试：\n\nnotchfax print 你好\n\n用 notchfax help 查看全部用法。"
+            alert.addButton(withTitle: "好")
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+            return
+        }
         Task {
             // Off the main actor: it waits for the administrator password dialog.
             let result = await Task.detached {

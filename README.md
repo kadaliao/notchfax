@@ -53,8 +53,13 @@ Notchfax 没在运行时会在后台把它打开再打印（`--no-launch` 则直
 
 不想解析标记就加 `--plain`，文字会原样印出来。一张纸最高约 1400 点，印不下会报错，不会截断。
 
+### AI 会话小票
+
+想让 Claude Code、Codex、Cursor、OpenCode 这类编程助手每干完一次活就打一张小票，点菜单里的「AI 会话小票…」：拷贝里面的提示词发给你的 AI，它会用自己的钩子或插件机制装好，再打一张样票给你看。各家的钩子和会话记录格式都不一样，也一直在变，所以 Notchfax 不替它们装，只提供 `notchfax print` 这个出口。面板里的「打一张样票」可以先看看小票长什么样。
+
 ### Claude Code 会话小票
 
+Claude Code 有现成的脚本，上面的提示词也会让它直接用这个。
 [`integrations/claude-code/notchfax-receipt.py`](integrations/claude-code/notchfax-receipt.py) 是一个 Claude Code 的 SessionEnd hook：会话结束时，按转录里的 token 用量和 API 标价算出这次花了多少钱，印成一张小票（分模型列出输入、输出、缓存读写，含子代理）。放到稳定的位置，再加进 `~/.claude/settings.json`：
 
 ```json

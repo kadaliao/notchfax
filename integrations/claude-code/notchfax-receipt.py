@@ -9,9 +9,9 @@ Install: copy this file somewhere stable and add to ~/.claude/settings.json
       ]
     }
 
-It needs the `notchfax` command (Notchfax menu: 安装命令行工具…). The hook returns at once
-and does the work in a detached process, because Claude Code gives SessionEnd hooks only a
-moment and the transcript can lag behind by a beat.
+It needs the `notchfax` command (Homebrew's cask installs it; otherwise Notchfax menu:
+安装命令行工具…). The hook returns at once and does the work in a detached process, because
+Claude Code gives SessionEnd hooks only a moment and the transcript can lag behind by a beat.
 
 By hand, for a session that is still going (prints the bill so far right away; the receipt
 at the end of the session still bills the whole thing):

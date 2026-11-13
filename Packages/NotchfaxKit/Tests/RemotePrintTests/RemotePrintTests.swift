@@ -128,3 +128,40 @@ final class LockedBox<Value: Sendable>: @unchecked Sendable {
     func get() -> Value { lock.withLock { value } }
     func set(_ newValue: Value) { lock.withLock { value = newValue } }
 }
+
+@Suite struct CommandLineInstallerTests {
+    @Test func findsALinkToThisAppWhereverItIs() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("notchfax-links-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let executable = folder.appendingPathComponent("Notchfax").path
+        let other = folder.appendingPathComponent("Other").path
+        FileManager.default.createFile(atPath: executable, contents: Data())
+        FileManager.default.createFile(atPath: other, contents: Data())
+
+        let missing = folder.appendingPathComponent("missing/notchfax").path
+        let elsewhere = folder.appendingPathComponent("elsewhere").path
+        let brew = folder.appendingPathComponent("brew").path
+        let plainFile = folder.appendingPathComponent("plain").path
+        try FileManager.default.createSymbolicLink(atPath: elsewhere, withDestinationPath: other)
+        try FileManager.default.createSymbolicLink(atPath: brew, withDestinationPath: executable)
+        FileManager.default.createFile(atPath: plainFile, contents: Data())
+
+        #expect(CommandLineInstaller.installedPath(among: [missing, elsewhere, plainFile, brew], executable: executable) == brew)
+        #expect(CommandLineInstaller.installedPath(among: [missing, elsewhere, plainFile], executable: executable) == nil)
+    }
+}
+
+@Suite @MainActor struct AgentReceiptTests {
+    @Test func promptUsesTheFullPath() {
+        let prompt = AgentReceipt.prompt(executable: "/Applications/Notchfax.app/Contents/MacOS/Notchfax")
+        #expect(prompt.contains("\n/Applications/Notchfax.app/Contents/MacOS/Notchfax\n"))
+        #expect(prompt.contains(AgentReceipt.claudeCodeScript))
+    }
+
+    @Test func sampleFitsOnOneSheet() throws {
+        let text = AgentReceipt.sample(endingAt: Date(timeIntervalSince1970: 1_800_000_000))
+        #expect(text.contains("样票"))
+        _ = try RemoteJobs.job(for: PrintRequest(text: text))
+    }
+}
