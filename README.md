@@ -24,7 +24,7 @@ brew install --cask kadaliao/tap/notchfax
 
 ## 命令行
 
-菜单里点「安装命令行工具…」，会在 `/usr/local/bin` 放一个 `notchfax`（要输一次管理员密码）。它就是 App 自己的可执行文件，所以也可以自己建链接：
+用 Homebrew 装的已经带了 `notchfax` 命令。下载 dmg 装的，在菜单里点「安装命令行工具…」，会在 `/usr/local/bin` 放一个 `notchfax`（要输一次管理员密码）。它就是 App 自己的可执行文件，所以也可以自己建链接：
 
 ```sh
 ln -s /Applications/Notchfax.app/Contents/MacOS/Notchfax ~/.local/bin/notchfax
