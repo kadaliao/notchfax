@@ -73,8 +73,11 @@ private func makeSession(
     return BoothSession(source: source, pipeline: pipeline, sink: sink, script: script, sleep: sleep)
 }
 
+/// Polls on the main actor. The default is generous because it only waits as long as needed, and
+/// on a CI machine the main actor is shared with every other `@MainActor` suite running in parallel:
+/// a session's hop to `.ready` once took longer than 5 s there.
 @MainActor
-private func waitUntil(_ condition: () -> Bool, timeout: Duration = .seconds(5)) async {
+private func waitUntil(_ condition: () -> Bool, timeout: Duration = .seconds(30)) async {
     let clock = ContinuousClock()
     let deadline = clock.now.advanced(by: timeout)
     while !condition(), clock.now < deadline {

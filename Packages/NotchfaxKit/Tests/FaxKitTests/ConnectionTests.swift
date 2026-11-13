@@ -202,8 +202,9 @@ private final class FakeFactory: FaxSocketFactory, Sendable {
     var last: FakeSocket? { sockets.withLock { $0.last } }
 }
 
-/// Waits for a condition, polling; fails the test after `timeout`.
-private func eventually(_ timeout: Double = 2, _ condition: @Sendable () async -> Bool) async -> Bool {
+/// Waits for a condition, polling; fails the test after `timeout`. Generous on purpose: it returns as
+/// soon as the condition holds, and CI machines run every suite in parallel on few cores.
+private func eventually(_ timeout: Double = 10, _ condition: @Sendable () async -> Bool) async -> Bool {
     let deadline = Date().addingTimeInterval(timeout)
     while Date() < deadline {
         if await condition() { return true }
@@ -267,7 +268,7 @@ private func eventually(_ timeout: Double = 2, _ condition: @Sendable () async -
         timing.heartbeatTimeout = 0.6
         let connection = FaxConnection(authority: FakeAuthority(), factory: factory, timing: timing, random: { 0 })
         await connection.start()
-        #expect(await eventually(5) { (factory.last?.sent.withLock { $0.count } ?? 0) >= 3 })
+        #expect(await eventually { (factory.last?.sent.withLock { $0.count } ?? 0) >= 3 })
         try? await Task.sleep(for: .seconds(1.5))
         let sent = factory.last?.sent.withLock { $0 } ?? []
         #expect(sent.allSatisfy { $0 == #"{"type":"ping"}"# })
