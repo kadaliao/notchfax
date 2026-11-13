@@ -1,0 +1,36 @@
+---
+name: 功能建议 / Feature request
+description: 想要它多会一件事 / An idea for something new
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 想解决什么 / The problem
+      description: >-
+        你想做什么，现在为什么做不到或者不顺手。
+        / What you want to do and why it is hard today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: 设想 / The idea
+      description: >-
+        你希望它怎么做。可以画个草图。
+        / How you imagine it working. A sketch helps.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 别的办法 / Alternatives
+      description: >-
+        想过的其他做法，或者现在怎么凑合的。
+        / Other approaches, or how you work around it now.
+  - type: checkboxes
+    id: pr
+    attributes:
+      label: 参与 / Contributing
+      options:
+        - label: 我愿意试着提一个 PR / I would like to try a pull request

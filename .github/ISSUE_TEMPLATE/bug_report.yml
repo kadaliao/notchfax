@@ -1,0 +1,84 @@
+---
+name: 错误报告 / Bug report
+description: 有东西不按预期工作 / Something does not work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        谢谢报告。先搜一下有没有人报过同样的问题。
+        安全问题请不要在这里提，发邮件到 kadaliao@gmail.com。
+
+        Thanks for reporting. Please search existing issues first.
+        For security issues, email kadaliao@gmail.com instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么 / What happened
+      description: >-
+        你做了什么，期望看到什么，实际看到什么。
+        / What you did, what you expected, what you saw.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 怎么复现 / Steps to reproduce
+      placeholder: |
+        1. 点菜单里的…
+        2. …
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 哪个功能 / Area
+      options:
+        - 纸张和走纸动画 / Paper and feed animation
+        - 那年今日 / On this day
+        - 大头贴 / Photo booth
+        - 传真 / Fax
+        - 命令行 notchfax / Command line
+        - AI 会话小票 / AI session receipts
+        - 其他 / Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Notchfax 版本 / Version
+      description: 菜单里的「关于」，或 `notchfax version`
+      placeholder: "0.2.1"
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS 版本和机型 / macOS and Mac model
+      description: 有没有刘海？接了几块显示器？/ Notch? How many displays?
+      placeholder: macOS 15.4，MacBook Pro 14 英寸 M3，有刘海，外接一块显示器
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: 安装方式 / Installed with
+      options:
+        - Homebrew
+        - dmg
+        - 自己构建 / Built from source
+  - type: textarea
+    id: media
+    attributes:
+      label: 截图或录屏 / Screenshots or recording
+      description: >-
+        动画的问题最好附一段录屏。
+        / For animation problems a screen recording helps most.
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / Logs
+      description: >-
+        命令行的输出，或 `~/Library/Logs/Notchfax/` 下的相关日志。
+        贴之前删掉密钥之类的东西。
+      render: text
