@@ -1,0 +1,25 @@
+{
+  "name": "dsh-notchfax-receipt",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Print a Notchfax receipt when a DeepSeek Harness desktop session ends.",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "receipt.py",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "notchfax",
+    "receipt"
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/kadaliao/notchfax/tree/main/integrations/dsh"
+}

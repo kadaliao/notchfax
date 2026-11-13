@@ -7,12 +7,22 @@ import SwiftUI
 /// install anything into them. It hands the person a prompt for their agent, which knows its
 /// own hooks and logs, and prints through the `notchfax` command.
 enum AgentReceipt {
-    static let claudeCodeScript = "https://raw.githubusercontent.com/kadaliao/notchfax/main/integrations/claude-code/notchfax-receipt.py"
+    /// Working setups for several agents, with the conventions they share and the receipt layout.
+    static let samples = "https://github.com/kadaliao/notchfax/tree/main/integrations"
+
+    /// Agents with a ready-made setup in `samples`, by the directory it lives in.
+    static let readyMade: [(agent: String, directory: String)] = [
+        ("Claude Code", "claude-code"),
+        ("Pi", "pi"),
+        ("OpenCode", "opencode"),
+        ("DeepSeek Harness 桌面版", "dsh"),
+    ]
 
     /// `executable`: the command's full path. Hooks often run with a bare PATH (agents opened
     /// from the Dock get only the system folders), so the script should not rely on `notchfax`.
     static func prompt(executable: String) -> String {
-        """
+        let ready = readyMade.map { "- \($0.agent)：\($0.directory)/" }.joined(separator: "\n")
+        return """
         帮我装一个功能：每次和你的会话结束时，让 Notchfax 从屏幕刘海里打印一张小票。
 
         Notchfax 是这台 Mac 上的一个 App，它的命令行在：
@@ -21,18 +31,20 @@ enum AgentReceipt {
 
         要求：
         1. 用你自己支持的钩子、插件或通知机制，在会话结束时触发。先查你自己的官方文档，确认有哪些机制，不要猜。
-        2. 小票写项目目录名、开始和结束时间、用时、模型、输入和输出 token、按官方标价算的花费，最后一行是合计。只写会话记录或日志里能查实的数字，查不到的那一行就不印，不要估算。同一个会话恢复后再结束，只算新增的部分。
+        2. 小票写项目目录名、开始和结束时间、用时、模型、输入和输出 token、按官方标价算的花费和合计。只写会话记录或日志里能查实的数字，查不到的那一行就不印，不要估算。同一个会话恢复后再结束，只算新增的部分。
         3. 钩子要马上返回，打印放到后台做，不能拖慢会话结束。打印失败就安静退出，错误写进 ~/Library/Logs/Notchfax/ 下的日志。
         4. 只给我手动开的交互式会话打印，脚本、CI 和子任务不打。
         5. 装好后先打一张样票给我看，再告诉我装在了哪、怎么关掉。
 
-        如果你是 Claude Code，直接用现成的脚本：
-        \(claudeCodeScript)
-        按文件开头的说明安装。
+        动手前先看现成的样例：
+        \(samples)
+        它的 README 写了几家共同的做法和小票的统一格式，照着做。下面这几家已经有现成的实现，你是其中一家就用对应目录里的，按里面的 README 安装，再对照你这里的实际版本核对一遍：
+        \(ready)
+        不是的话，就参考触发方式和你最像的那一个。
         """
     }
 
-    /// A made-up receipt in the layout the Claude Code script prints, so people can see what
+    /// A made-up receipt in the shared layout the samples print, so people can see what
     /// they would get before they set anything up. It says it is a sample, top and bottom.
     static func sample(endingAt end: Date) -> String {
         let start = end.addingTimeInterval(-45 * 60)
@@ -50,8 +62,8 @@ enum AgentReceipt {
         对话\t12 问 · 86 次调用
         ---
         ## 示例模型\t$1.84
-        > 输入 52.1K\t$0.26
-        > 输出 31.6K\t$1.58
+        > 输入 5.2万\t$0.26
+        > 输出 3.2万\t$1.58
         ---
         # 合计\t$1.84
         ^ > 按 API 标价估算

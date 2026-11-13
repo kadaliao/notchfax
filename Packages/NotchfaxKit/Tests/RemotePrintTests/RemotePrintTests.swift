@@ -156,7 +156,23 @@ final class LockedBox<Value: Sendable>: @unchecked Sendable {
     @Test func promptUsesTheFullPath() {
         let prompt = AgentReceipt.prompt(executable: "/Applications/Notchfax.app/Contents/MacOS/Notchfax")
         #expect(prompt.contains("\n/Applications/Notchfax.app/Contents/MacOS/Notchfax\n"))
-        #expect(prompt.contains(AgentReceipt.claudeCodeScript))
+        #expect(prompt.contains(AgentReceipt.samples))
+        for entry in AgentReceipt.readyMade {
+            #expect(prompt.contains("- \(entry.agent)：\(entry.directory)/"))
+        }
+    }
+
+    /// Each ready-made setup the prompt names has to exist in the repository, with a README.
+    @Test func readyMadeSamplesExist() {
+        // Tests/RemotePrintTests/<file> -> Packages/NotchfaxKit -> repository root.
+        var root = URL(filePath: #filePath)
+        for _ in 0..<5 { root = root.deletingLastPathComponent() }
+        let integrations = root.appending(path: "integrations")
+        #expect(FileManager.default.fileExists(atPath: integrations.appending(path: "README.md").path))
+        for entry in AgentReceipt.readyMade {
+            let directory = integrations.appending(path: entry.directory)
+            #expect(FileManager.default.fileExists(atPath: directory.path), "\(entry.directory)")
+        }
     }
 
     @Test func sampleFitsOnOneSheet() throws {

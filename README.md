@@ -57,9 +57,10 @@ Notchfax 没在运行时会在后台把它打开再打印（`--no-launch` 则直
 
 想让 Claude Code、Codex、Cursor、OpenCode 这类编程助手每干完一次活就打一张小票，点菜单里的「AI 会话小票…」：拷贝里面的提示词发给你的 AI，它会用自己的钩子或插件机制装好，再打一张样票给你看。各家的钩子和会话记录格式都不一样，也一直在变，所以 Notchfax 不替它们装，只提供 `notchfax print` 这个出口。面板里的「打一张样票」可以先看看小票长什么样。
 
+[`integrations/`](integrations/) 里有 Claude Code、Pi、OpenCode、DeepSeek Harness 桌面版的现成实现，提示词会让 AI 先看这些：是这几家就直接装，别家照着改。那里的 README 写了几家共同的做法和统一的小票格式。
+
 ### Claude Code 会话小票
 
-Claude Code 有现成的脚本，上面的提示词也会让它直接用这个。
 [`integrations/claude-code/notchfax-receipt.py`](integrations/claude-code/notchfax-receipt.py) 是一个 Claude Code 的 SessionEnd hook：会话结束时，按转录里的 token 用量和 API 标价算出这次花了多少钱，印成一张小票（分模型列出输入、输出、缓存读写，含子代理）。放到稳定的位置，再加进 `~/.claude/settings.json`：
 
 ```json
@@ -113,7 +114,7 @@ Packages/NotchfaxKit/
   Sources/PhotoBooth/     大头贴
   Sources/FaxKit/         传真客户端
   Sources/RemotePrint/    命令行打印：notchfax 命令、App 里的接收端、小票排版
-integrations/claude-code/ Claude Code 会话结束时打印花费小票的 hook
+integrations/             AI 会话小票的现成实现（Claude Code、Pi、OpenCode、DSH）和共同做法
 server/                   传真中继服务器（Cloudflare Workers，见 server/README.md）
 docs/protocol.md          传真协议
 scripts/make-icon.swift   生成应用图标
@@ -172,4 +173,4 @@ $APP --fax-profile bob
 - **声音和触感**：声音全部程序合成，波形有单元测试，但没有人坐在这台机器前认真听过；触感需要带力度触控板的机器。
 - **线上服务器**：只连过本地 `wrangler dev`，没有部署过。
 - **签名与公证**：本地构建是 ad-hoc 签名，没有做过分发。
-- **「安装命令行工具…」**：要弹管理员密码框，只验证过拼出来的命令，没有点过一次完整流程；`notchfax` 命令本身和 Claude Code 小票 hook 都实际跑过。
+- **「安装命令行工具…」**：要弹管理员密码框，只验证过拼出来的命令，没有点过一次完整流程；`notchfax` 命令本身和 Claude Code 小票 hook 都实际跑过；Pi、OpenCode、DSH 的插件在作者机器上用着，仓库里整理过的版本只手动跑过出票脚本（`--dry-run`），还没在各家里重新装一遍。

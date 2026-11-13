@@ -1,0 +1,11 @@
+# Append to ~/.dsh/profiles/desktop/cordis.patch.yml.
+# `name` is the absolute path to index.js.
+# Turn off: set enabled to false (hot), or delete this row.
+- insert:
+    - id: notchfax-receipt
+      name: '/Users/<you>/.dsh/plugins/dsh-notchfax-receipt/index.js'
+      config:
+        enabled: true
+        # pollMs: 1500              # how often the archive set is checked
+        # python: /usr/bin/python3
+        # botsDirs: ['~/Bots']      # sessions under these get no receipt
