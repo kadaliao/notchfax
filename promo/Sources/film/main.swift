@@ -13,8 +13,12 @@ import SwiftUI
 //   film                      渲染整片 → out/video.mp4 + out/sfx.wav
 //   film --frame 12.5         只出一帧 → out/frame-12.50.png
 //   film --range 40 58        只渲染一段（调试）
+//   film --vertical …         9:16 竖版（视频号），输出 out/video-9x16.mp4、out/v-frame-*.png
+//   film --cover 3x4|4x3      视频号封面 → out/cover-3x4.png / out/cover-4x3.png
 
-let outW = 1920, outH = 1080, fps = 60
+var outW = 1920, outH = 1080
+let fps = 60
+var isVertical: Bool { outH > outW }
 let screenSize = CGSize(width: 900, height: 560)
 let promoDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 let outDir = promoDir.appendingPathComponent("out")
@@ -70,6 +74,12 @@ struct Palette {
         blobs: [(0.2, 0.85, 0.8, (0.08, 0.20, 0.44), 0.9), (0.85, 0.15, 0.7, (0.16, 0.14, 0.40), 0.9), (0.55, 0.5, 0.4, (0.10, 0.30, 0.50), 0.35)],
         glow: (0.12, 0.24, 0.55)
     )
+    /// 竖版开场用：亮一些，黑色的刘海在上面更显眼。
+    static let sky = Palette(
+        base: (0.16, 0.24, 0.46),
+        blobs: [(0.2, 0.3, 0.75, (0.36, 0.56, 0.92), 0.9), (0.85, 0.8, 0.7, (0.60, 0.42, 0.80), 0.85), (0.55, 0.06, 0.5, (0.96, 0.68, 0.60), 0.5)],
+        glow: (0.30, 0.45, 0.80)
+    )
     static let terminal = Palette(
         base: (0.05, 0.07, 0.07),
         blobs: [(0.15, 0.2, 0.7, (0.08, 0.30, 0.26), 0.9), (0.9, 0.9, 0.7, (0.16, 0.20, 0.30), 0.9), (0.6, 0.0, 0.4, (0.30, 0.42, 0.30), 0.35)],
@@ -78,7 +88,7 @@ struct Palette {
 }
 
 @MainActor
-func wallpaper(_ palette: Palette, clock: String) -> CGImage {
+func wallpaper(_ palette: Palette, clock: String, menus: Bool = true) -> CGImage {
     let scale: CGFloat = 3
     let size = screenSize
     let ctx = CGContext(data: nil, width: Int(size.width * scale), height: Int(size.height * scale), bitsPerComponent: 8, bytesPerRow: 0, space: srgb, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
@@ -92,7 +102,7 @@ func wallpaper(_ palette: Palette, clock: String) -> CGImage {
     let bar: CGFloat = 32
     ctx.setFillColor(CGColor(gray: 0, alpha: 0.28))
     ctx.fill(CGRect(x: 0, y: size.height - bar, width: size.width, height: bar))
-    withGraphics(ctx) {
+    if menus { withGraphics(ctx) {
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12.5, weight: .medium), .foregroundColor: NSColor(white: 1, alpha: 0.92)]
         var x: CGFloat = 20
         for (index, item) in ["", "Finder", "文件", "编辑", "显示", "前往", "窗口", "帮助"].enumerated() {
@@ -105,7 +115,7 @@ func wallpaper(_ palette: Palette, clock: String) -> CGImage {
         }
         let right = NSAttributedString(string: clock, attributes: attrs)
         right.draw(at: CGPoint(x: size.width - 20 - right.size().width, y: size.height - bar + (bar - right.size().height) / 2))
-    }
+    } }
     return ctx.makeImage()!
 }
 
@@ -143,9 +153,9 @@ final class FilmHost: SheetHost {
     let sound = SoundPlayer()
     var controllers: [SheetController] = []
 
-    init(palette: Palette, clock: String) {
+    init(palette: Palette, clock: String, menus: Bool) {
         scene = PrintKit.Scene(size: screenSize, dark: true, simulateNotch: true)
-        scene.root.sublayers?.first?.contents = wallpaper(palette, clock: clock)
+        scene.root.sublayers?.first?.contents = wallpaper(palette, clock: clock, menus: menus)
         sound.isMuted = true
     }
 
@@ -213,12 +223,12 @@ final class ScreenShot: Shot {
     private static let hand = cursorImage(.closedHand)
     private static let open = cursorImage(.openHand)
 
-    init(start: Double, end: Double, palette: Palette, clock: String, sfx: SFXTrack) {
+    init(start: Double, end: Double, palette: Palette, clock: String, sfx: SFXTrack, menus: Bool = true) {
         self.start = start
         self.end = end
         self.palette = palette
         self.sfx = sfx
-        host = FilmHost(palette: palette, clock: clock)
+        host = FilmHost(palette: palette, clock: clock, menus: menus)
         host.sound.tap = { [weak self] samples in
             guard let self else { return }
             sfx.now = self.start + self.simTime
@@ -368,10 +378,11 @@ final class ScreenShot: Shot {
         let colours = [CGColor(gray: 0, alpha: 0), CGColor(gray: 0, alpha: 0.38)] as CFArray
         if let vignette = CGGradient(colorsSpace: srgb, colors: colours, locations: [0.55, 1]) {
             let c = CGPoint(x: outW / 2, y: outH / 2)
-            ctx.drawRadialGradient(vignette, startCenter: c, startRadius: 0, endCenter: c, endRadius: 1150, options: [.drawsAfterEndLocation])
+            ctx.drawRadialGradient(vignette, startCenter: c, startRadius: 0, endCenter: c, endRadius: CGFloat(hypot(Double(outW), Double(outH))) / 2 * 1.045, options: [.drawsAfterEndLocation])
         }
         let length = end - start
-        let fade = 1 - min(smooth(t / fadeIn), smooth((length - t) / fadeOut))
+        let shown = fadeIn > 0 ? smooth(t / fadeIn) : 1
+        let fade = 1 - min(shown, smooth((length - t) / fadeOut))
         if fade > 0.001 {
             ctx.setFillColor(CGColor(gray: 0, alpha: fade))
             ctx.fill(CGRect(x: 0, y: 0, width: outW, height: outH))
@@ -498,11 +509,14 @@ final class EndShot: Shot {
     let end: Double
     let icon: CGImage?
     let iconAt: Double
+    /// 图标中心离画面顶边多远。
+    let iconY: CGFloat
 
-    init(start: Double, end: Double, iconAt: Double) {
+    init(start: Double, end: Double, iconAt: Double, iconY: CGFloat = 290) {
         self.start = start
         self.end = end
         self.iconAt = iconAt
+        self.iconY = iconY
         let url = promoDir.deletingLastPathComponent().appendingPathComponent("App/Assets.xcassets/AppIcon.appiconset/icon-1024.png")
         icon = NSImage(contentsOf: url)?.cgImage(forProposedRect: nil, context: nil, hints: nil)
     }
@@ -511,14 +525,15 @@ final class EndShot: Shot {
         ctx.setFillColor(rgb(0.012, 0.012, 0.02))
         ctx.fill(CGRect(x: 0, y: 0, width: outW, height: outH))
         let breathe = 0.5 + 0.5 * sin(t * 0.5)
-        blob(ctx, at: CGPoint(x: 960, y: 620), radius: 900, color: (0.75, 0.40, 0.25), alpha: 0.10 + 0.03 * breathe)
-        blob(ctx, at: CGPoint(x: 700, y: 300), radius: 800, color: (0.20, 0.24, 0.55), alpha: 0.12)
+        let sx = CGFloat(outW) / 1920, sy = CGFloat(outH) / 1080, r = max(sx, sy)
+        blob(ctx, at: CGPoint(x: 960 * sx, y: 620 * sy), radius: 900 * r, color: (0.75, 0.40, 0.25), alpha: 0.10 + 0.03 * breathe)
+        blob(ctx, at: CGPoint(x: 700 * sx, y: 300 * sy), radius: 800 * r, color: (0.20, 0.24, 0.55), alpha: 0.12)
         if let icon, t >= iconAt {
             let u = easeOut((t - iconAt) / 1.1)
             let side = 230.0 * (0.92 + 0.08 * u)
             ctx.saveGState()
             ctx.setAlpha(u)
-            ctx.draw(icon, in: CGRect(x: 960 - side / 2, y: 1080 - 290 - side / 2 - 18 * (1 - u), width: side, height: side))
+            ctx.draw(icon, in: CGRect(x: CGFloat(outW) / 2 - side / 2, y: CGFloat(outH) - iconY - side / 2 - 18 * (1 - u), width: side, height: side))
             ctx.restoreGState()
         }
         let fade = smooth((t - (end - start - 1.3)) / 1.2)
@@ -536,7 +551,7 @@ struct Title {
     var text: String
     var size: CGFloat
     var weight: NSFont.Weight = .semibold
-    /// 左对齐时是左边缘，居中时是中线；y 是文字块顶边，都按 1920×1080、原点在左上。
+    /// 左对齐时是左边缘，居中时是中线；y 是文字块顶边，都是输出像素、原点在左上。
     var x: CGFloat
     var y: CGFloat
     var align: Align = .left
@@ -676,35 +691,69 @@ enum Prints {
 
 // MARK: - The film
 
+/// 竖版机位：让刘海的上沿落在画面 `top` 像素处，水平居中。
+@MainActor
+func notchCam(_ t: Double, _ zoom: CGFloat, top: CGFloat, centerX: CGFloat? = nil) -> CameraKey {
+    let cx = centerX ?? CGFloat(outW) / 2
+    return CameraKey(t: t, x: 450 - (cx - CGFloat(outW) / 2) / zoom, y: (CGFloat(outH) / 2 - top) / zoom, zoom: zoom)
+}
+
 @MainActor
 func makeFilm(sfx: SFXTrack) -> (shots: [any Shot], titles: [Title]) {
     var titles: [Title] = []
     let left: CGFloat = 150
+    let V = isVertical
+    let mid = CGFloat(outW) / 2
+    /// 竖版：刘海上沿的位置。上面留给标题，下面留给纸；底部约 380 像素让给视频号的文案和按钮。
+    let top: CGFloat = 640
 
     func chapter(_ kicker: String, _ headline: String, from t0: Double, to t1: Double) {
-        titles.append(Title(text: kicker, size: 34, weight: .bold, x: left + 3, y: 372, t0: t0, t1: t1, color: orange, tracking: 7))
-        titles.append(Title(text: headline, size: 92, weight: .bold, x: left, y: 440, t0: t0 + 0.18, t1: t1, tracking: 1, lineSpacing: 14))
+        if V {
+            titles.append(Title(text: kicker, size: 34, weight: .bold, x: mid, y: 250, align: .center, t0: t0, t1: t1, color: orange, tracking: 7))
+            titles.append(Title(text: headline, size: 84, weight: .bold, x: mid, y: 308, align: .center, t0: t0 + 0.18, t1: t1, tracking: 1, lineSpacing: 14))
+        } else {
+            titles.append(Title(text: kicker, size: 34, weight: .bold, x: left + 3, y: 372, t0: t0, t1: t1, color: orange, tracking: 7))
+            titles.append(Title(text: headline, size: 92, weight: .bold, x: left, y: 440, t0: t0 + 0.18, t1: t1, tracking: 1, lineSpacing: 14))
+        }
     }
 
     // 一、刘海
-    let intro = ScreenShot(start: 0, end: 12.0, palette: .ink, clock: "11月13日 周五  21:41", sfx: sfx)
-    intro.fadeIn = 1.6
-    intro.camera = [
-        CameraKey(t: 0, x: 450, y: 285, zoom: 1.5),
-        CameraKey(t: 1.0, x: 450, y: 285, zoom: 1.5),
-        CameraKey(t: 4.9, x: 450, y: 62, zoom: 5.4),
-        CameraKey(t: 5.6, x: 450, y: 62, zoom: 5.5),
-        CameraKey(t: 7.6, x: 355, y: 150, zoom: 3.2),
-        CameraKey(t: 12.0, x: 355, y: 152, zoom: 3.3),
-    ]
+    let intro = ScreenShot(start: 0, end: 12.0, palette: V ? .sky : .ink, clock: "11月13日 周五  21:41", sfx: sfx)
+    if V {
+        // 第一帧就是亮的：整块屏幕和开场那句话，不从黑场淡入。
+        intro.fadeIn = 0
+        intro.camera = [
+            notchCam(0, 2.2, top: 700),
+            notchCam(4.9, 5.4, top: 770),
+            notchCam(5.6, 5.5, top: 770),
+            notchCam(7.6, 3.1, top: top),
+            notchCam(12.0, 3.2, top: top),
+        ]
+        titles.append(Title(text: "每一台 MacBook 的屏幕上，\n都有一块黑色的地方。", size: 60, weight: .bold, x: mid, y: 360, align: .center, t0: -1, t1: 4.7, tracking: 1, lineSpacing: 16))
+        titles.append(Title(text: "我们想，\n让它吐出点什么。", size: 72, weight: .bold, x: mid, y: 330, align: .center, t0: 5.0, t1: 8.2, tracking: 1, lineSpacing: 16))
+        titles.append(Title(text: "Notchfax", size: 140, weight: .bold, x: mid, y: 270, align: .center, t0: 8.9, t1: 11.6, tracking: -2))
+        titles.append(Title(text: "住在刘海里的小打印机", size: 44, weight: .medium, x: mid, y: 462, align: .center, t0: 9.3, t1: 11.6, color: CGColor(gray: 1, alpha: 0.72), tracking: 3))
+    } else {
+        intro.fadeIn = 1.6
+        intro.camera = [
+            CameraKey(t: 0, x: 450, y: 285, zoom: 1.5),
+            CameraKey(t: 1.0, x: 450, y: 285, zoom: 1.5),
+            CameraKey(t: 4.9, x: 450, y: 62, zoom: 5.4),
+            CameraKey(t: 5.6, x: 450, y: 62, zoom: 5.5),
+            CameraKey(t: 7.6, x: 355, y: 150, zoom: 3.2),
+            CameraKey(t: 12.0, x: 355, y: 152, zoom: 3.3),
+        ]
+        titles.append(Title(text: "Notchfax", size: 150, weight: .bold, x: left - 6, y: 380, t0: 8.9, t1: 11.6, tracking: -2))
+        titles.append(Title(text: "住在刘海里的小打印机", size: 44, weight: .medium, x: left, y: 580, t0: 9.3, t1: 11.6, color: CGColor(gray: 1, alpha: 0.72), tracking: 3))
+    }
     intro.print(at: 7.0, seed: 21) { Prints.hello() }
     intro.tearOff(at: 10.9)
-    titles.append(Title(text: "Notchfax", size: 150, weight: .bold, x: left - 6, y: 380, t0: 8.9, t1: 11.6, tracking: -2))
-    titles.append(Title(text: "住在刘海里的小打印机", size: 44, weight: .medium, x: left, y: 580, t0: 9.3, t1: 11.6, color: CGColor(gray: 1, alpha: 0.72), tracking: 3))
 
     // 二、那年今日
     let memories = ScreenShot(start: 12.0, end: 24.0, palette: .dusk, clock: "11月13日 周五  08:30", sfx: sfx)
-    memories.camera = [CameraKey(t: 0, x: 355, y: 148, zoom: 3.2), CameraKey(t: 12, x: 352, y: 152, zoom: 3.42)]
+    memories.camera = V
+        ? [notchCam(0, 3.2, top: top), notchCam(12, 3.4, top: top)]
+        : [CameraKey(t: 0, x: 355, y: 148, zoom: 3.2), CameraKey(t: 12, x: 352, y: 152, zoom: 3.42)]
     memories.print(at: 0.7, seed: 12) { Prints.memory() }
     memories.gesture(at: 5.6, "swing")
     memories.gesture(at: 8.0, "carry")
@@ -712,7 +761,9 @@ func makeFilm(sfx: SFXTrack) -> (shots: [any Shot], titles: [Title]) {
 
     // 三、大头贴
     let booth = ScreenShot(start: 24.0, end: 34.5, palette: .candy, clock: "11月13日 周五  15:07", sfx: sfx)
-    booth.camera = [CameraKey(t: 0, x: 355, y: 160, zoom: 3.1), CameraKey(t: 10.5, x: 352, y: 166, zoom: 3.25)]
+    booth.camera = V
+        ? [notchCam(0, 2.8, top: top), notchCam(10.5, 2.9, top: top)]
+        : [CameraKey(t: 0, x: 355, y: 160, zoom: 3.1), CameraKey(t: 10.5, x: 352, y: 166, zoom: 3.25)]
     booth.booth = (show: 0.3, hide: 3.9, counts: [0.85, 1.25, 1.65])
     booth.sound(at: 0.3, .slip)
     for t in [0.85, 1.25, 1.65] { booth.sound(at: t, .tick) }
@@ -724,7 +775,9 @@ func makeFilm(sfx: SFXTrack) -> (shots: [any Shot], titles: [Title]) {
 
     // 四、传真
     let fax = ScreenShot(start: 34.5, end: 49.5, palette: .night, clock: "11月13日 周五  22:40", sfx: sfx)
-    fax.camera = [CameraKey(t: 0, x: 355, y: 158, zoom: 3.1), CameraKey(t: 15, x: 352, y: 164, zoom: 3.28)]
+    fax.camera = V
+        ? [notchCam(0, 3.0, top: top), notchCam(15, 3.15, top: top)]
+        : [CameraKey(t: 0, x: 355, y: 158, zoom: 3.1), CameraKey(t: 15, x: 352, y: 164, zoom: 3.28)]
     fax.print(at: 0.8, seed: 11) { Prints.fax(page: 1) }
     fax.gesture(at: 6.3, "rip")
     fax.print(at: 8.2, seed: 17) { Prints.fax(page: 2) }
@@ -733,13 +786,32 @@ func makeFilm(sfx: SFXTrack) -> (shots: [any Shot], titles: [Title]) {
 
     // 五、命令行
     let cli = ScreenShot(start: 49.5, end: 57.0, palette: .terminal, clock: "11月13日 周五  23:58", sfx: sfx)
-    cli.camera = [CameraKey(t: 0, x: 355, y: 170, zoom: 3.0), CameraKey(t: 7.5, x: 353, y: 176, zoom: 3.12)]
     cli.print(at: 2.0, seed: 31) { Prints.bill() }
-    titles.append(Title(text: "命令行", size: 34, weight: .bold, x: left + 3, y: 330, t0: 49.9, t1: 56.6, color: orange, tracking: 7))
-    titles.append(Title(text: "终端里的事，\n也能落在纸上。", size: 84, weight: .bold, x: left, y: 398, t0: 50.1, t1: 56.6, tracking: 1, lineSpacing: 12))
-    titles.append(Title(text: "$ notchfax print 小票.md", size: 36, weight: .medium, x: left + 30, y: 690, t0: 50.2, t1: 56.6, color: rgb(0.72, 0.95, 0.78), mono: true, typed: 22, pill: true))
+    let prompt = "$ notchfax print 小票.md"
+    if V {
+        cli.camera = [notchCam(0, 2.9, top: top), notchCam(7.5, 3.0, top: top)]
+        titles.append(Title(text: "命令行", size: 34, weight: .bold, x: mid, y: 185, align: .center, t0: 49.9, t1: 56.6, color: orange, tracking: 7))
+        titles.append(Title(text: "终端里的事，\n也能落在纸上。", size: 78, weight: .bold, x: mid, y: 240, align: .center, t0: 50.1, t1: 56.6, tracking: 1, lineSpacing: 12))
+        // 逐字敲出来的那行要左对齐，否则字会从中间往两边长；按整行宽度算出左边缘。
+        let promptFont = NSFont.monospacedSystemFont(ofSize: 34, weight: .medium)
+        let promptWidth = NSAttributedString(string: prompt, attributes: [.font: promptFont]).size().width
+        titles.append(Title(text: prompt, size: 34, weight: .medium, x: mid - promptWidth / 2 - 15, y: 494, t0: 50.2, t1: 56.6, color: rgb(0.72, 0.95, 0.78), mono: true, typed: 22, pill: true))
+    } else {
+        cli.camera = [CameraKey(t: 0, x: 355, y: 170, zoom: 3.0), CameraKey(t: 7.5, x: 353, y: 176, zoom: 3.12)]
+        titles.append(Title(text: "命令行", size: 34, weight: .bold, x: left + 3, y: 330, t0: 49.9, t1: 56.6, color: orange, tracking: 7))
+        titles.append(Title(text: "终端里的事，\n也能落在纸上。", size: 84, weight: .bold, x: left, y: 398, t0: 50.1, t1: 56.6, tracking: 1, lineSpacing: 12))
+        titles.append(Title(text: prompt, size: 36, weight: .medium, x: left + 30, y: 690, t0: 50.2, t1: 56.6, color: rgb(0.72, 0.95, 0.78), mono: true, typed: 22, pill: true))
+    }
 
     // 六、片尾
+    if V {
+        let ending = EndShot(start: 57.0, end: filmLength, iconAt: 5.25, iconY: 600)
+        titles.append(Title(text: "有些话，有些时刻，\n值得被印出来。", size: 84, weight: .bold, x: mid, y: 640, align: .center, t0: 57.5, t1: 61.8, tracking: 3, lineSpacing: 22))
+        titles.append(Title(text: "Notchfax", size: 112, weight: .bold, x: mid, y: 765, align: .center, t0: 62.6, t1: filmLength, tracking: -1))
+        titles.append(Title(text: "住在刘海里的小打印机", size: 42, weight: .medium, x: mid, y: 915, align: .center, t0: 63.0, t1: filmLength, color: CGColor(gray: 1, alpha: 0.7), tracking: 4))
+        titles.append(Title(text: "brew install --cask\nkadaliao/tap/notchfax", size: 30, weight: .regular, x: mid, y: 1060, align: .center, t0: 64.0, t1: filmLength, color: CGColor(gray: 1, alpha: 0.5), mono: true, lineSpacing: 10))
+        return ([intro, memories, booth, fax, cli, ending], titles)
+    }
     let ending = EndShot(start: 57.0, end: filmLength, iconAt: 5.25)
     titles.append(Title(text: "有些话，有些时刻，\n值得被印出来。", size: 96, weight: .bold, x: 960, y: 400, align: .center, t0: 57.5, t1: 61.8, tracking: 3, lineSpacing: 22))
     titles.append(Title(text: "Notchfax", size: 104, weight: .bold, x: 960, y: 448, align: .center, t0: 62.6, t1: filmLength, tracking: -1))
@@ -749,25 +821,73 @@ func makeFilm(sfx: SFXTrack) -> (shots: [any Shot], titles: [Title]) {
     return ([intro, memories, booth, fax, cli, ending], titles)
 }
 
+// MARK: - Covers
+
+/// 视频号的两张封面：个人主页卡片 3:4，分享卡片 4:3。一张那年今日的相纸从刘海里垂下来。
+@MainActor
+func makeCover(_ kind: String, sfx: SFXTrack) -> (shot: ScreenShot, titles: [Title], at: Double) {
+    let shot = ScreenShot(start: 0, end: 100, palette: .dusk, clock: "11月13日 周五  08:30", sfx: sfx, menus: false)
+    shot.fadeIn = 0
+    shot.print(at: 0.2, seed: 12) { Prints.memory() }
+    let features = "那年今日  ·  大头贴  ·  传真  ·  命令行"
+    var titles: [Title] = []
+    if kind == "4x3" {
+        shot.camera = [notchCam(0, 3.45, top: 235, centerX: 1040)]
+        let x: CGFloat = 120
+        titles.append(Title(text: "NOTCHFAX", size: 34, weight: .heavy, x: x + 2, y: 420, t0: -5, t1: 999, color: orange, tracking: 10))
+        titles.append(Title(text: "住在刘海里的\n小打印机", size: 88, weight: .bold, x: x, y: 478, t0: -5, t1: 999, tracking: 2, lineSpacing: 14))
+        titles.append(Title(text: features, size: 30, weight: .medium, x: x + 2, y: 750, t0: -5, t1: 999, color: CGColor(gray: 1, alpha: 0.8), tracking: 1))
+    } else {
+        let mid = CGFloat(outW) / 2
+        shot.camera = [notchCam(0, 3.35, top: 560)]
+        titles.append(Title(text: "NOTCHFAX", size: 36, weight: .heavy, x: mid, y: 170, align: .center, t0: -5, t1: 999, color: orange, tracking: 12))
+        titles.append(Title(text: "住在刘海里的\n小打印机", size: 100, weight: .bold, x: mid, y: 232, align: .center, t0: -5, t1: 999, tracking: 3, lineSpacing: 14))
+        titles.append(Title(text: features, size: 34, weight: .medium, x: mid, y: 1282, align: .center, t0: -5, t1: 999, color: CGColor(gray: 1, alpha: 0.8), tracking: 1))
+    }
+    return (shot, titles, 3.6)
+}
+
 @MainActor
 func main() throws {
     _ = NSApplication.shared
     try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
     var args = Array(CommandLine.arguments.dropFirst())
     var single: Double?
+    var cover: String?
     var range = 0.0...filmLength
     while !args.isEmpty {
         let arg = args.removeFirst()
+        if arg == "--vertical" { outW = 1080; outH = 1920 }
+        if arg == "--cover", let v = args.first {
+            cover = v
+            args.removeFirst()
+            (outW, outH) = v == "4x3" ? (1440, 1080) : (1080, 1440)
+        }
         if arg == "--frame", let v = args.first.flatMap(Double.init) { single = v; args.removeFirst() }
         if arg == "--range", args.count >= 2, let a = Double(args[0]), let b = Double(args[1]) { range = a...b; args.removeFirst(2) }
     }
 
     let sfx = SFXTrack(seconds: filmLength + 1)
-    let film = makeFilm(sfx: sfx)
     let ctx = CGContext(
         data: nil, width: outW, height: outH, bitsPerComponent: 8, bytesPerRow: outW * 4, space: srgb,
         bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
     )!
+
+    if let cover {
+        let made = makeCover(cover, sfx: sfx)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        made.shot.draw(in: ctx, at: made.at)
+        for title in made.titles { draw(title, in: ctx, at: made.at) }
+        CATransaction.commit()
+        let url = outDir.appendingPathComponent("cover-\(cover).png")
+        try PaperRenderer.pngData(ctx.makeImage()!)?.write(to: url)
+        print(url.path)
+        return
+    }
+
+    let film = makeFilm(sfx: sfx)
+    let tag = isVertical ? "v-" : ""
 
     func render(_ t: Double) {
         CATransaction.begin()
@@ -783,14 +903,14 @@ func main() throws {
 
     if let single {
         render(single)
-        let url = outDir.appendingPathComponent(String(format: "frame-%05.2f.png", single))
+        let url = outDir.appendingPathComponent(tag + String(format: "frame-%05.2f.png", single))
         try PaperRenderer.pngData(ctx.makeImage()!)?.write(to: url)
         print(url.path)
         return
     }
 
     let whole = range == 0.0...filmLength
-    let video = outDir.appendingPathComponent(whole ? "video.mp4" : "part.mp4")
+    let video = outDir.appendingPathComponent(tag + (whole ? (isVertical ? "video-9x16.mp4" : "video.mp4") : "part.mp4"))
     let ffmpeg = Process()
     ffmpeg.executableURL = URL(fileURLWithPath: "/usr/bin/env")
     ffmpeg.arguments = [
@@ -812,7 +932,7 @@ func main() throws {
     }
     try pipe.fileHandleForWriting.close()
     ffmpeg.waitUntilExit()
-    if whole { try sfx.write(to: outDir.appendingPathComponent("sfx.wav")) }
+    if whole, !isVertical { try sfx.write(to: outDir.appendingPathComponent("sfx.wav")) }
     print(video.path)
 }
 
