@@ -4,6 +4,8 @@
 
 ## [未发布]
 
+## [0.2.2] - 2026-11-13
+
 ### 新增
 
 - **更多编程助手的会话小票**：`integrations/` 里新增 Pi、OpenCode、DeepSeek Harness 桌面版的现成实现，和 Claude Code 一样能直接装。`integrations/README.md` 写了几家共同的做法和统一的小票格式，方便给别的助手照着写。
@@ -52,7 +54,8 @@
 - **传真**：匿名写给一位随机的陌生人。第一封只能是文字；对方回复后线路接通，才能互发图片。图片一律转成黑白点阵。
 - 纸可以抓着晃、横着撕、拖出去存成图片。没有刘海的屏幕会在顶部正中画一个出纸口。
 
-[未发布]: https://github.com/kadaliao/notchfax/compare/v0.2.1...HEAD
+[未发布]: https://github.com/kadaliao/notchfax/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/kadaliao/notchfax/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/kadaliao/notchfax/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/kadaliao/notchfax/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/kadaliao/notchfax/releases/tag/v0.1.0
