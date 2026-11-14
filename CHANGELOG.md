@@ -4,6 +4,8 @@
 
 ## [未发布]
 
+## [0.3.0] - 2026-11-14
+
 ### 新增
 
 - **自动更新**：每 6 小时看一次 GitHub 发布页，有新版本就在后台下好，核对校验值，并确认是同一位开发者的 Developer ID 签名，然后从刘海吐一张小票。点「现在重启」马上换上，不理它的话下次退出时自动装好，换好后第一次启动会印一张「现在是 x.y.z」。菜单里新加「检查更新…」和「自动更新」开关。从「下载」文件夹或磁盘映像里直接打开的、装在没有写权限位置的，会提示去发布页下载。
@@ -64,7 +66,8 @@
 - **传真**：匿名写给一位随机的陌生人。第一封只能是文字；对方回复后线路接通，才能互发图片。图片一律转成黑白点阵。
 - 纸可以抓着晃、横着撕、拖出去存成图片。没有刘海的屏幕会在顶部正中画一个出纸口。
 
-[未发布]: https://github.com/kadaliao/notchfax/compare/v0.2.2...HEAD
+[未发布]: https://github.com/kadaliao/notchfax/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/kadaliao/notchfax/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/kadaliao/notchfax/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/kadaliao/notchfax/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/kadaliao/notchfax/compare/v0.1.0...v0.2.0
