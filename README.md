@@ -53,6 +53,8 @@ Notchfax 常驻菜单栏，所有功能都在那个小纸条图标里。
 
 匿名写给一位随机的陌生人。第一封只能是文字；对方回复后线路接通，才能互发图片，图片一律转成黑白点阵。没有账号，没有昵称。
 
+每条线路的往来都留在这台 Mac 上。菜单「线路」里点「聊天记录…」，整段对话会从刘海里垂下来：对方的在左、你的在右，哪一页都能再打印一份。挂断的线路也能翻，不想留了可以删掉。
+
 ### 命令行和 AI 会话小票
 
 <img src="docs/media/receipt.webp" width="560" alt="命令行：在终端里运行 notchfax print，刘海里吐出一张 Claude Code 会话小票">
@@ -71,7 +73,7 @@ brew install --cask kadaliao/tap/notchfax
 
 - 需要 macOS 14 以上，Apple Silicon 和 Intel 通用，已签名并经过 Apple 公证。
 - 第一次启动会请求照片图库和摄像头权限，分别用于那年今日和大头贴，然后印一张说明小票。
-- 没有自动更新。升级用 `brew upgrade --cask notchfax`，或重新下载。
+- 会自动更新：每 6 小时看一次发布页，有新版本就在后台下好，核对校验值和开发者签名，然后从刘海吐一张小票，点「现在重启」就换上，不理它的话下次退出时自动装好。菜单里可以关掉「自动更新」，也可以随时「检查更新…」。用 Homebrew 装的也一样，或者照旧 `brew upgrade --cask notchfax`。
 
 ## 命令行
 
@@ -164,6 +166,7 @@ python3 integrations/claude-code/notchfax-receipt.py --session <会话 ID>
 - 没有账号、昵称、邮箱。身份是本机生成的一把密钥，存在登录钥匙串里。
 - 服务器不记录 IP，也不开请求日志。
 - 图片在对方确认收到 24 小时后删除；线路关闭 30 天后清理。
+- 文字在对方确认收到后就从服务器删掉，聊天记录只存在你自己的 Mac 上，不会自动清理，只在你删除时消失。
 - 照片图库和摄像头画面只在本机处理，只有你主动发出的传真会离开这台 Mac。
 
 协议见 [`docs/protocol.md`](docs/protocol.md)，服务器的设计和限额见 [`server/README.md`](server/README.md)。

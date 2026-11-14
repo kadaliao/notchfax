@@ -55,6 +55,8 @@ A viewfinder drops down below the slot, counts down three seconds and takes four
 
 Write an anonymous fax to a random stranger. The first one can only be text; once they reply, the line connects and you can send pictures too, always converted to black-and-white dots. No accounts, no names.
 
+Every line's conversation stays on your Mac. Choose 聊天记录… (History) under 线路 (Lines) in the menu and the whole exchange hangs down from the notch, theirs on the left and yours on the right; any page can be printed again. Lines that were hung up can be read too, and deleted when you no longer want them.
+
 ### Command line and AI session receipts
 
 <img src="docs/media/receipt.webp" width="560" alt="Command line: running notchfax print in a terminal prints a Claude Code session receipt">
@@ -73,7 +75,7 @@ Or download the dmg from [Releases](https://github.com/kadaliao/notchfax/release
 
 - Requires macOS 14 or later. Universal (Apple Silicon and Intel), signed and notarized by Apple.
 - On first launch it asks for Photos and Camera access (for On this day and Photo booth), then prints a welcome slip.
-- There is no auto-update. Upgrade with `brew upgrade --cask notchfax`, or download again.
+- It updates itself: every six hours it looks at the releases page, downloads a newer version in the background, checks its checksum and developer signature, then prints a slip from the notch. Press 现在重启 (Restart now) to switch over, or leave it and it goes in the next time Notchfax quits. Turn 自动更新 (Automatic updates) off in the menu, or use 检查更新… (Check for updates) at any time. Homebrew installs update the same way, and `brew upgrade --cask notchfax` still works.
 
 ## Command line
 
@@ -137,6 +139,7 @@ Faxes go through a relay, the public one at `notchfax.liaoxingyi.com` by default
 - No accounts, names or email. Your identity is a key generated on your Mac and kept in the login keychain.
 - The server does not record IP addresses and keeps no request logs.
 - Pictures are deleted 24 hours after the recipient confirms them; lines are purged 30 days after they close.
+- Text is deleted from the server as soon as the recipient confirms it. Your conversations live only on your own Mac; they are never cleaned up automatically, only when you delete them.
 - Your photo library and camera are processed on your Mac only. Only faxes you send leave it.
 
 The protocol is in [`docs/protocol.md`](docs/protocol.md); the server's design and limits are in [`server/README.md`](server/README.md) (Chinese).

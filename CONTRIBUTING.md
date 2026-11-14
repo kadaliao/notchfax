@@ -50,6 +50,11 @@ build/DerivedData/Build/Products/Debug/Notchfax.app/Contents/MacOS/Notchfax --de
 | `--fax-profile <名字>` | 独立的传真身份和本地数据，用来在一台 Mac 上开两个实例互发 |
 | `--fax-debug-…` | 无人值守的端到端脚本，见 `Sources/FaxKit/Debug/FaxDebugRunner.swift` |
 | `--fax-render-samples <目录>` | 离屏渲染传真样张后退出 |
+| `--fax-debug-history` | 启动后打开最近一条线路的聊天记录 |
+| `--update-feed <网址>` | 这次运行从这里读最新版本，代替 GitHub 发布页；`file://` 也行，里面的下载链接同样可以是 `file://` |
+| `--update-check` | 启动后马上检查一次更新，和菜单「检查更新…」一样 |
+| `--update-current <版本>` | 假装正在运行这个版本 |
+| `--update-install-when-ready` | 下好就直接重启换上，相当于点了小票上的「现在重启」 |
 
 没有摄像头、没有刘海的机器也能开发：`--simulate-notch` 加 `--photobooth-simulated` 就能看全部画面。
 
@@ -97,6 +102,7 @@ Packages/NotchfaxKit/
   Sources/PhotoBooth/     大头贴
   Sources/FaxKit/         传真客户端
   Sources/RemotePrint/    命令行打印：notchfax 命令、App 里的接收端、小票排版、AI 会话小票面板
+  Sources/Updater/        自动更新：读发布页、下载校验、核对签名、替换并重启
 integrations/             各家编程助手的会话小票实现和共同做法
 server/                   传真中继服务器（Cloudflare Workers）
 docs/protocol.md          传真协议
@@ -129,7 +135,7 @@ docs: …
 chore: release 0.2.2
 ```
 
-范围（括号里的）用模块名：`printkit`、`memories`、`photobooth`、`fax`、`receipt`、`server`、`integrations`、`promo`。正文写清为什么改、怎么验证的。
+范围（括号里的）用模块名：`printkit`、`memories`、`photobooth`、`fax`、`receipt`、`updater`、`server`、`integrations`、`promo`。正文写清为什么改、怎么验证的。
 
 ## 发版
 
@@ -138,7 +144,7 @@ chore: release 0.2.2
 1. 在 [CHANGELOG.md](CHANGELOG.md) 里把「未发布」改成新版本号和日期。
 2. 改 `project.yml` 和 `App/Info.plist` 里的 `CFBundleShortVersionString`（版本号）和 `CFBundleVersion`（每次加一），提交 `chore: release x.y.z`，打标签 `vx.y.z`。
 3. `NOTARY_PROFILE=notary scripts/release.sh`：构建、用 Developer ID 签名、公证，产出 `build/release/` 下的 dmg、zip 和 `SHA256SUMS`。
-4. `gh release create vx.y.z build/release/*`，说明照 CHANGELOG 写。
+4. `gh release create vx.y.z build/release/*`，说明照 CHANGELOG 写。**发布即推送**：装着的 Notchfax 6 小时内会自己下载 `Notchfax-x.y.z.zip` 换上，所以压缩包的名字别改，必须用同一个 Developer ID 团队签名（否则会被拒绝安装）。想先检查再放出去，就先建草稿（`--draft`）；草稿和预发布版不会被自动更新取到。说明里前几条列表项会印在更新小票上，粗体开头的条目只印粗体那几个字，「安装与升级」一节会跳过。
 5. 更新 [kadaliao/homebrew-tap](https://github.com/kadaliao/homebrew-tap) 里 `Casks/notchfax.rb` 的版本号和 dmg 的 sha256。
 
 ## README 的演示动画
