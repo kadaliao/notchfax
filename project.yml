@@ -43,6 +43,8 @@ targets:
         product: FaxKit
       - package: NotchfaxKit
         product: RemotePrint
+      - package: NotchfaxKit
+        product: Updater
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.kadaliao.notchfax

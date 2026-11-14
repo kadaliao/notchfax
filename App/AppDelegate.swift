@@ -5,6 +5,7 @@ import PhotoBooth
 import PrintKit
 import RemotePrint
 import ServiceManagement
+import Updater
 
 /// Command-line switches for development.
 ///
@@ -51,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let printer = Printer()
     private var features: [any FeatureModule] = []
     private lazy var remotePrint = RemotePrintFeature(printer: printer)
+    private lazy var updater = UpdateFeature(printer: printer)
     private var statusItem: NSStatusItem?
     private lazy var debug = DebugSamples(printer: printer)
 
@@ -76,7 +78,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             PhotoBoothFeature(printer: printer),
             FaxFeature(printer: printer),
             remotePrint,
+            updater,
         ]
+        updater.allowsAutomaticChecks = !launch.isScripted
 
         installStatusItem()
         printer.start()
@@ -98,6 +102,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // A downloaded update goes in on the way out, so the next launch is the new version.
+        updater.installOnQuit()
         printer.stop()
     }
 
@@ -129,6 +135,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .action("登录时启动", isOn: SMAppService.mainApp.status == .enabled) { [weak self] in self?.toggleLaunchAtLogin() },
             .action("安装命令行工具…", isOn: CommandLineInstaller.isInstalled) { [weak self] in self?.installCommandLineTool() },
             .action("AI 会话小票…") { [weak self] in self?.remotePrint.openAgentReceipt() },
+            .separator,
+        ] + updater.menuEntries() + [
             .separator,
             .action("退出 Notchfax") { NSApp.terminate(nil) },
         ]
