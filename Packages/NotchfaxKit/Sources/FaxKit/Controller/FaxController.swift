@@ -19,6 +19,7 @@ final class FaxController {
     private(set) lazy var printQueue = FaxPrintQueue(controller: self)
     private(set) lazy var notices = NoticeCenter(controller: self)
     private(set) lazy var composer = ComposeCoordinator(controller: self)
+    private(set) lazy var history = HistoryCoordinator(controller: self)
     private var debug: FaxDebugRunner?
 
     /// Lines whose next printed page should say the line has just connected.
@@ -36,6 +37,7 @@ final class FaxController {
         log = FaxLog(path: launch.script.logPath, profile: launch.profile)
         status = environment.server == nil ? .notConfigured : .connecting
         if launch.script.isActive { debug = FaxDebugRunner(script: launch.script, controller: self) }
+        store.didChange = { [weak self] in self?.history.storeDidChange() }
     }
 
     // MARK: Lifecycle
@@ -46,7 +48,6 @@ final class FaxController {
             return
         }
         log("starting; server \(server.absoluteString); profile \(environment.profile ?? "default")")
-        prune()
         let keyStore = environment.keyStore
         monitors = SystemMonitors(
             onSleep: { [weak self] in self?.pauseConnection(.sleeping) },
@@ -79,6 +80,7 @@ final class FaxController {
     func stop() {
         log("stopping")
         composer.cancel()
+        history.close()
         reportPresentation?.dismiss()
         pendingConnectNotices.values.forEach { $0.cancel() }
         pendingConnectNotices.removeAll()
@@ -108,11 +110,6 @@ final class FaxController {
         status = new
         log("status \(new)")
         debug?.statusChanged(new)
-    }
-
-    private func prune() {
-        let dropped = store.update { $0.prune(now: Date().unixMilliseconds) }
-        store.removeImages(dropped)
     }
 
     // MARK: Incoming
@@ -526,9 +523,16 @@ final class FaxController {
                 self?.composer.open(target: .stranger)
             },
         ]
-        let lines = store.archive.openLines
+        // Open lines first, then every hung-up line that still has pages to look back on.
+        var lines = store.archive.openLines.map(lineEntry)
+        let closed = store.archive.closedLinesWithHistory
+        if !closed.isEmpty {
+            if !lines.isEmpty { lines.append(.separator) }
+            lines.append(.label("已挂断 · 点开看聊天记录"))
+            lines += closed.map(closedLineEntry)
+        }
         if !lines.isEmpty {
-            entries.append(.submenu(title: "线路", systemImage: "phone", items: lines.map(lineEntry)))
+            entries.append(.submenu(title: "线路", systemImage: "phone", items: lines))
         }
         // One quiet line: how the connection is, and what is left to send today.
         if status == .online, let quota = quotaText {
@@ -555,10 +559,12 @@ final class FaxController {
         }
         let when = FaxFormat.relative(Date(unixMilliseconds: stored.lastActivityAt))
         let title = line.peerAlias.map { "#\($0)　\(state) · \(when)" } ?? "\(state) · \(when)"
-        let hasPages = store.archive.messages(inLine: line.id).contains { $0.message.kind == .text || $0.imageFile != nil }
+        let pages = store.archive.messages(inLine: line.id)
+        let hasPages = pages.contains { $0.message.kind == .text || $0.imageFile != nil }
         let lineId = line.id
         return .submenu(title: title, items: [
-            .action("重新打印", systemImage: "printer", isEnabled: hasPages) { [weak self] in self?.reprint(lineId: lineId) },
+            .action("聊天记录…", systemImage: "clock.arrow.circlepath", isEnabled: !pages.isEmpty) { [weak self] in self?.history.open(lineId: lineId) },
+            .action("重新打印最后一页", systemImage: "printer", isEnabled: hasPages) { [weak self] in self?.reprint(lineId: lineId) },
             .action(line.canSendImage ? "回复或发图片…" : "回复…", systemImage: "arrowshape.turn.up.left", isEnabled: line.canSendText) { [weak self] in
                 self?.composer.open(target: .line(lineId))
             },
@@ -568,6 +574,17 @@ final class FaxController {
                 ? .action("撤回这封传真", systemImage: "arrow.uturn.backward") { [weak self] in self?.tear(lineId: lineId, handle: nil, report: false) }
                 : .action("挂断线路", systemImage: "phone.down") { [weak self] in self?.tear(lineId: lineId, handle: nil, report: false) },
         ])
+    }
+
+    /// A hung-up line: its history opens straight away.
+    private func closedLineEntry(_ stored: StoredLine) -> MenuEntry {
+        let alias = stored.line.peerAlias.map { "#\($0)" } ?? "没有送达"
+        let pages = store.archive.messages(inLine: stored.id).count
+        let when = FaxFormat.day(Date(unixMilliseconds: stored.lastActivityAt))
+        let lineId = stored.id
+        return .action("\(alias)　\(when) · \(pages) 页") { [weak self] in
+            self?.history.open(lineId: lineId)
+        }
     }
 
     private var statusText: String {

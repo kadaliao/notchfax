@@ -8,6 +8,8 @@ import os
 final class FaxStore {
     let directory: URL
     private(set) var archive: FaxArchive
+    /// Called after every change has been written, so an open history can follow along.
+    var didChange: (@MainActor () -> Void)?
     private let logger = Logger(subsystem: "com.kadaliao.notchfax", category: "fax.store")
 
     private var fileURL: URL { directory.appendingPathComponent("store.json") }
@@ -23,6 +25,7 @@ final class FaxStore {
     func update<T>(_ change: (inout FaxArchive) -> T) -> T {
         let result = change(&archive)
         save()
+        didChange?()
         return result
     }
 

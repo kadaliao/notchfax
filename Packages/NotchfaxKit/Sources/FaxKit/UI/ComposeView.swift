@@ -319,7 +319,7 @@ extension ComposeSheetLayout where ImageOverlay == EmptyView {
 
 // MARK: - Controls
 
-private struct CircleButton: View {
+struct CircleButton: View {
     let systemImage: String
     let help: String
     let action: @MainActor () -> Void

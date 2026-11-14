@@ -30,6 +30,10 @@ struct StoredLine: Codable, Sendable, Equatable, Identifiable {
 }
 
 /// Everything the fax feature remembers, as one value. Pure: no I/O, no clocks.
+///
+/// Nothing is forgotten on its own. The server deletes text once it is acknowledged, so
+/// this is the only record of a conversation; a line keeps every page, hung up or not,
+/// until the person deletes it (`forget(lineId:)`).
 struct FaxArchive: Codable, Sendable, Equatable {
     var version = 1
     private(set) var lines: [String: StoredLine] = [:]
@@ -154,32 +158,26 @@ struct FaxArchive: Codable, Sendable, Equatable {
         messages(inLine: lineId).last { $0.isFromPeer }
     }
 
-    // MARK: Housekeeping
+    // MARK: History
 
-    /// Forgets closed lines that have been quiet for `closedRetention`, and keeps at most
-    /// `perLine` messages on any line. Never drops a message that still needs printing
-    /// or acknowledging. Returns the image files that are no longer referenced.
-    mutating func prune(now: Int64, closedRetention: Int64 = 30 * 86_400_000, perLine: Int = 200) -> [String] {
-        var droppedFiles: [String] = []
-        let keepStatuses: Set<StoredMessage.Status> = [.pending, .printed]
-        for (id, stored) in lines where stored.line.state == .closed && now - stored.lastActivityAt > closedRetention {
-            let inLine = messages(inLine: id)
-            guard !inLine.contains(where: { keepStatuses.contains($0.status) }) else { continue }
-            for message in inLine {
-                messages.removeValue(forKey: message.id)
-                if let file = message.imageFile { droppedFiles.append(file) }
-            }
-            lines.removeValue(forKey: id)
-        }
-        for id in lines.keys {
-            let inLine = messages(inLine: id)
-            guard inLine.count > perLine else { continue }
-            for message in inLine.prefix(inLine.count - perLine) where !keepStatuses.contains(message.status) {
-                messages.removeValue(forKey: message.id)
-                if let file = message.imageFile { droppedFiles.append(file) }
-            }
-        }
-        return droppedFiles
+    /// Closed lines that still have pages to look back on, most recently active first.
+    var closedLinesWithHistory: [StoredLine] {
+        let withMessages = Set(messages.values.map(\.message.lineId))
+        return lines.values
+            .filter { !$0.line.isOpen && withMessages.contains($0.id) }
+            .sorted { ($0.lastActivityAt, $0.id) > ($1.lastActivityAt, $1.id) }
+    }
+
+    /// Forgets a closed line and every page on it, for good: this Mac holds the only copy.
+    /// Returns the image files that are no longer referenced, or `nil` when the line is
+    /// still open or a page on it has not been printed and acknowledged yet.
+    mutating func forget(lineId: String) -> [String]? {
+        guard let stored = lines[lineId], !stored.line.isOpen else { return nil }
+        let inLine = messages(inLine: lineId)
+        guard !inLine.contains(where: { $0.status == .pending || $0.status == .printed }) else { return nil }
+        for message in inLine { messages.removeValue(forKey: message.id) }
+        lines.removeValue(forKey: lineId)
+        return inLine.compactMap(\.imageFile)
     }
 
     private mutating func touch(lineId: String, at time: Int64) {

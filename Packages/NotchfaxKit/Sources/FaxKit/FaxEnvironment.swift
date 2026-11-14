@@ -14,6 +14,8 @@ struct FaxLaunchOptions: Sendable, Equatable {
     var renderSamplesDirectory: String?
     /// Debug: open the server panel at launch.
     var showsServerSettings = false
+    /// Debug: open the most recently active line's history at launch.
+    var showsHistory = false
 
     init(arguments: [String]) {
         var iterator = arguments.dropFirst().makeIterator()
@@ -38,6 +40,7 @@ struct FaxLaunchOptions: Sendable, Equatable {
             case "--fax-debug-log": script.logPath = iterator.next()
             case "--fax-render-samples": renderSamplesDirectory = iterator.next()
             case "--fax-debug-server-settings": showsServerSettings = true
+            case "--fax-debug-history": showsHistory = true
             default: break
             }
         }

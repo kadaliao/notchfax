@@ -105,7 +105,7 @@ struct ReportConfirmView: View {
     }
 }
 
-private struct PillStyle: ButtonStyle {
+struct PillStyle: ButtonStyle {
     let fill: Color
 
     func makeBody(configuration: Configuration) -> some View {

@@ -44,6 +44,14 @@ public final class FaxFeature: FeatureModule {
                 openServerSettings()
             }
         }
+        if launch.showsHistory {
+            Task {
+                try? await Task.sleep(for: .milliseconds(900))
+                let archive = controller.store.archive
+                let latest = (archive.openLines + archive.closedLinesWithHistory).max { $0.lastActivityAt < $1.lastActivityAt }
+                if let latest { controller.history.open(lineId: latest.id) }
+            }
+        }
     }
 
     // MARK: Server

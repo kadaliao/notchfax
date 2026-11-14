@@ -69,18 +69,63 @@ private func message(_ id: String, line: String = "L1", from: MessageSender = .p
         #expect(archive.openLines.map(\.id) == ["A"])
     }
 
-    @Test func `pruning forgets old closed lines but never an unprinted page`() {
+    @Test func `a hung-up line keeps every page, however old and however many`() {
         var archive = FaxArchive()
-        archive.upsert(line(.closed, id: "old", updatedAt: 0), at: 0)
-        _ = archive.ingest(message("printed", line: "old", sentAt: 0), at: 0)
-        archive.markPrinted("printed")
-        archive.markAcknowledged("printed")
-        archive.upsert(line(.closed, id: "kept", updatedAt: 0), at: 0)
-        _ = archive.ingest(message("unprinted", line: "kept", sentAt: 0), at: 0)
-        _ = archive.prune(now: 40 * 86_400_000)
-        #expect(archive.line("old") == nil)
-        #expect(archive.message("printed") == nil)
-        #expect(archive.message("unprinted") != nil)
+        archive.upsert(line(.connected, id: "busy"), at: 0)
+        for index in 0..<450 {
+            _ = archive.ingest(message("M\(index)", line: "busy", sentAt: Int64(index)), at: Int64(index))
+            archive.markPrinted("M\(index)")
+            archive.markAcknowledged("M\(index)")
+        }
+        archive.upsert(line(.closed, id: "busy", updatedAt: 500), at: 500)
+        #expect(archive.messages(inLine: "busy").count == 450)
+        #expect(archive.page(of: "M449") == 450)
+        #expect(archive.openLines.isEmpty)
+        #expect(archive.closedLinesWithHistory.map(\.id) == ["busy"])
+    }
+
+    @Test func `history pages come in order, numbered, with both sides`() {
+        var archive = FaxArchive()
+        archive.upsert(line(.connected), at: 0)
+        _ = archive.ingest(message("P1", sentAt: 1, text: "你好"), at: 1)
+        archive.recordSent(LineMessage(line: line(.connected), message: message("Me1", from: .me, sentAt: 2, text: "你好呀")), at: 2)
+        let picture = Message(id: "P2", lineId: "L1", from: .peer, kind: .image, imageId: "img", width: 276, height: 200, sentAt: 3)
+        _ = archive.ingest(picture, at: 3)
+        let pages = archive.historyPages(inLine: "L1")
+        #expect(pages.map(\.id) == ["P1", "Me1", "P2"])
+        #expect(pages.map(\.number) == [1, 2, 3])
+        #expect(pages.map(\.fromPeer) == [true, false, true])
+        #expect(pages[0].body == .text("你好"))
+        #expect(pages[2].body == .image(file: nil), "a picture still downloading")
+        #expect(!pages[2].canReprint)
+        archive.setImageFile("P2.png", for: "P2")
+        #expect(archive.historyPages(inLine: "L1")[2].body == .image(file: "P2.png"))
+    }
+
+    @Test func `only a hung-up line with nothing left to print can be deleted`() {
+        var archive = FaxArchive()
+        archive.upsert(line(.connected, id: "open"), at: 0)
+        _ = archive.ingest(message("O1", line: "open", sentAt: 1), at: 1)
+        #expect(!archive.canForget(lineId: "open"))
+        #expect(archive.forget(lineId: "open") == nil)
+
+        archive.upsert(line(.closed, id: "unprinted"), at: 0)
+        _ = archive.ingest(message("U1", line: "unprinted", sentAt: 1), at: 1)
+        #expect(archive.forget(lineId: "unprinted") == nil, "a page that has not come out yet")
+        archive.markPrinted("U1")
+        #expect(archive.forget(lineId: "unprinted") == nil, "nor one the server has not heard about")
+
+        archive.upsert(line(.closed, id: "done"), at: 0)
+        _ = archive.ingest(Message(id: "D1", lineId: "done", from: .peer, kind: .image, imageId: "i", sentAt: 1), at: 1)
+        archive.setImageFile("D1.png", for: "D1")
+        archive.markPrinted("D1")
+        archive.markAcknowledged("D1")
+        archive.recordSent(LineMessage(line: line(.closed, id: "done"), message: message("D2", line: "done", from: .me, sentAt: 2)), at: 2)
+        #expect(archive.canForget(lineId: "done"))
+        #expect(archive.forget(lineId: "done") == ["D1.png"])
+        #expect(archive.line("done") == nil)
+        #expect(archive.message("D1") == nil && archive.message("D2") == nil)
+        #expect(archive.closedLinesWithHistory.map(\.id) == ["unprinted"])
     }
 }
 
