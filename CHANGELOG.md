@@ -4,6 +4,8 @@
 
 ## [未发布]
 
+## [0.3.1] - 2026-11-16
+
 ### 修正
 
 - **Claude Code 会话小票**：分叉出来的会话不再把从原会话复制过来的历史再算一遍。以前一个只问了一句的分叉会话，会把原会话几十次调用的钱也印上。
@@ -77,7 +79,8 @@
 - **传真**：匿名写给一位随机的陌生人。第一封只能是文字；对方回复后线路接通，才能互发图片。图片一律转成黑白点阵。
 - 纸可以抓着晃、横着撕、拖出去存成图片。没有刘海的屏幕会在顶部正中画一个出纸口。
 
-[未发布]: https://github.com/kadaliao/notchfax/compare/v0.3.0...HEAD
+[未发布]: https://github.com/kadaliao/notchfax/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/kadaliao/notchfax/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/kadaliao/notchfax/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/kadaliao/notchfax/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/kadaliao/notchfax/compare/v0.2.0...v0.2.1
