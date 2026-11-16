@@ -143,15 +143,17 @@ Notchfax 没在运行时会在后台把它打开再打印（`--no-launch` 则直
 }
 ```
 
-默认只给有人在场的会话出小票（终端、桌面 App、IDE），`claude -p` 和 SDK 驱动的自动任务不出。同一个会话再次结束时只结新增的部分。
+默认只给有人在场的会话出小票（终端、桌面 App、IDE），`claude -p` 和 SDK 驱动的自动任务不出。同一个会话再次结束时只结新增的部分；分叉出来的会话不算从原会话复制过来的历史。
 
 | 环境变量 | 作用 |
 |---|---|
+| `NOTCHFAX_RECEIPT` | 设成 `0` 就不出小票 |
 | `NOTCHFAX_RECEIPT_ENTRYPOINTS` | 哪些入口出小票，`*` 为全部 |
 | `NOTCHFAX_RECEIPT_MIN_USD` | 低于这个数不打，默认 0.01 |
 | `NOTCHFAX_RECEIPT_CNY_RATE` | 顺便折成人民币 |
+| `NOTCHFAX_BIN` | Notchfax 命令的位置，默认用 `/Applications/Notchfax.app` 里的 |
 
-会话还没结束也能随时打一张到目前为止的对账单（不算结账）；加 `--dry-run` 只在终端里显示：
+会话还没结束也能随时打一张到目前为止的对账单（不算结账），加 `--sample` 印成「样票」；加 `--dry-run` 只在终端里显示：
 
 ```sh
 python3 integrations/claude-code/notchfax-receipt.py --session <会话 ID>
