@@ -671,8 +671,12 @@ final class SheetController {
             return finish(.torn)
         }
         guard phase == .hanging, motor == nil else { return }
-        guard paper.isTearable else { return requestRetract() }
         grab = nil
+        guard paper.isTearable else {
+            // Cut paper cannot tear: it slips out of the slot whole and drops away.
+            host.sound.play(.slip)
+            return discard(velocity: CGVector(dx: 0, dy: 40), spin: (Hash.unit(9, 9, seed) - 0.5) * 1.6)
+        }
         beginTear(side: Hash.unit(9, 9, seed) < 0.5 ? -1 : 1)
         tear?.finishesAlone = true
     }
@@ -786,14 +790,16 @@ final class SheetController {
             pull.value = newPull
 
             if !held, job.interaction.contains(.detach) {
+                // One yank takes any paper off the machine: a rip sideways, or a hard pull down.
+                // Letting go of it afterwards throws it away, so a swing must never do it.
                 let speed = velocity(of: g)
-                if paper.isTearable {
-                    let ripped = (abs(delta.dx) > 34 && abs(speed.dx) > 500) || abs(delta.dx) > 110
-                    if ripped || delta.dy > 95 || rawPull > 80 {
+                let ripped = (abs(delta.dx) > 34 && abs(speed.dx) > 500) || abs(delta.dx) > 110
+                if ripped || delta.dy > 95 || rawPull > 80 {
+                    if paper.isTearable {
                         beginTear(side: delta.dx >= 0 ? 1 : -1)
+                    } else {
+                        pullFree()
                     }
-                } else if rawPull > 26 || hypot(delta.dx, delta.dy) > 52 {
-                    pullFree()
                 }
             }
         }
@@ -809,12 +815,10 @@ final class SheetController {
         if phase == .tearing, let progress = tear?.progress, progress >= 0.5 { tear?.finishesAlone = true }
         if phase == .freeHeld {
             let v = velocity(of: g, now: time)
-            if isTorn {
-                beginFalling(velocity: v)
-            } else if isAwayFromMachine, hypot(v.dx, v.dy) < 600 {
+            if !isTorn, isAwayFromMachine, hypot(v.dx, v.dy) < 600 {
                 setDown(velocity: v)
             } else {
-                beginReturning(velocity: v)
+                discard(velocity: v)
             }
         }
         idle = 0
@@ -892,6 +896,16 @@ final class SheetController {
         motor = Motor(program: FeedProgram(distance: Double(h) - restOut, cadence: grip, seed: seed), base: Double(h), direction: -1, goal: .reposition)
         host.haptic(.alignment)
         host.sheetStateDidChange()
+    }
+
+    /// Off the machine for good: a torn receipt, or cut paper let go of near the slot or
+    /// thrown, the way a torn receipt is. `.torn` is sent once, when it first goes.
+    private func discard(velocity: CGVector, spin: Double? = nil) {
+        if !isTorn {
+            isTorn = true
+            handle?.emit(.torn)
+        }
+        beginFalling(velocity: velocity, spin: spin)
     }
 
     private func beginFalling(velocity: CGVector, from current: SheetPose? = nil, spin: Double? = nil) {
@@ -1073,7 +1087,8 @@ final class SheetController {
 
     /// Cut paper put down away from the machine is kept: it is saved to the Desktop and
     /// the sheet comes to rest where it was let go. A throw, or a release near the slot,
-    /// still sends it back.
+    /// throws it away instead (`discard`). If it cannot be saved, it goes back to the slot
+    /// rather than being lost.
     private func setDown(velocity: CGVector) {
         guard job.interaction.contains(.dragOut), let file = exportFileURL(), let saved = host.saveToDesktop(file) else {
             return beginReturning(velocity: velocity)
@@ -1123,13 +1138,11 @@ final class SheetController {
         pendulum = Pendulum()
         node.opacity = 1
         phase = .freeHeld
-        if isTorn {
-            beginFalling(velocity: .zero)
-        } else if isAwayFromMachine {
+        if !isTorn, isAwayFromMachine {
             // Nothing took the file where it was dropped: keep it on the Desktop instead.
             setDown(velocity: .zero)
         } else {
-            beginReturning(velocity: .zero)
+            discard(velocity: .zero)
         }
         host.requestFrames()
     }

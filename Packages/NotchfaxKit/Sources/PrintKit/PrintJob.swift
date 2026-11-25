@@ -355,7 +355,7 @@ public final class PrintHandle: Identifiable {
         if let controller { controller.requestRetract() } else { cancel() }
     }
 
-    /// Tears the sheet off and lets it fall away. Cut paper, which cannot tear, is retracted instead.
+    /// Tears the sheet off and lets it fall away. Cut paper, which cannot tear, slips out whole and falls the same way.
     public func tearOff() {
         if let controller { controller.requestTearOff() } else { cancel() }
     }

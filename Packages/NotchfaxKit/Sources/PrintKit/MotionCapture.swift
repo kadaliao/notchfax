@@ -72,7 +72,7 @@ struct PointerScript {
         ], pressAt: 0.1, releaseAt: 0.82)
     }
 
-    /// Pull a cut sheet out of the slot, carry it around, let go so it returns.
+    /// Pull a cut sheet out of the slot, carry it around, let go near the machine so it falls away.
     static func carry(height h: CGFloat) -> PointerScript {
         PointerScript(keys: [
             Key(time: 0, x: 0, y: h * 0.5), Key(time: 0.12, x: 0, y: h * 0.5),

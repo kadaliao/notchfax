@@ -399,12 +399,47 @@ private typealias Spring = PrintKit.Spring
         #expect(late.phase == .gone)
     }
 
-    @Test func `cut paper pulled free and let go returns to the slot`() {
+    @Test func `cut paper pulled free and let go near the machine is thrown away like torn paper`() {
         let result = simulate(.glossyPhoto, gesture: "carry", after: 3.5)
-        #expect(result.events == [.startedFeeding, .finishedFeeding])
-        #expect(result.phase == .hanging)
+        #expect(result.events == [.startedFeeding, .finishedFeeding, .torn])
+        #expect(result.phase == .gone)
         #expect(!result.requestedFileDrag)
-        #expect(!result.slotFreed)
+        #expect(result.slotFreed)
+    }
+
+    @Test func `a thrown photo falls away and is never saved`() {
+        for paper in [Paper.glossyPhoto, .photoStrip] {
+            let result = simulate(paper, gesture: "fling", after: 3)
+            #expect(result.events == [.startedFeeding, .finishedFeeding, .torn])
+            #expect(result.phase == .gone)
+            #expect(!result.requestedFileDrag)
+            #expect(result.savedToDesktop.isEmpty)
+        }
+    }
+
+    @Test func `a small tug does not take a photo out`() {
+        let (controller, host, events) = hangingSheet(.glossyPhoto)
+        let start = CGPoint(x: host.geometry.anchor.x, y: host.geometry.anchor.y + 120)
+        controller.mouseDown(at: start, time: 0)
+        // Enough to pull it out before, when letting go only sent it back to the slot.
+        for step in 1...30 {
+            controller.mouseDragged(to: CGPoint(x: start.x + Double(step) * 1.6, y: start.y + Double(step) * 1.6), time: Double(step) / 60)
+            controller.tick(1.0 / 60)
+        }
+        #expect(controller.phase == .hanging)
+        controller.mouseUp(at: CGPoint(x: start.x + 48, y: start.y + 48), time: 0.6)
+        settle(controller)
+        #expect(controller.phase == .hanging)
+        #expect(events() == [.startedFeeding, .finishedFeeding])
+    }
+
+    @Test func `tearing off a photo lets it fall away whole`() {
+        let (controller, _, events) = hangingSheet(.glossyPhoto)
+        controller.requestTearOff()
+        settle(controller)
+        #expect(controller.phase == .gone)
+        #expect(controller.slotFreed)
+        #expect(events().last == .torn)
     }
 
     @Test func `carrying a sheet far away and holding it still starts a file drag`() {
