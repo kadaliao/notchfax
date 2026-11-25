@@ -26,7 +26,7 @@ public final class MemoriesFeature: FeatureModule {
 
     private var checkTask: Task<Void, Never>?
     private var dailyRun: Task<Void, Never>?
-    private var observers: [(NotificationCenter, NSObjectProtocol)] = []
+    private var clockWatcher: ClockWatcher?
     /// A request is fetching or downloading.
     private var isLoading = false
     private var sampleCursor = 0
@@ -53,7 +53,7 @@ public final class MemoriesFeature: FeatureModule {
     }
 
     public func start() {
-        observeSystemEvents()
+        clockWatcher = ClockWatcher { [weak self] in self?.scheduleCheck(after: 3) }
         if options.demo {
             Task {
                 try? await Task.sleep(for: .milliseconds(900))
@@ -313,7 +313,7 @@ public final class MemoriesFeature: FeatureModule {
     private func check() {
         let now = Date()
         guard settings.autoPrint else { return }
-        if schedule.isDue(now: now, lastPrintedDay: settings.lastPrintedDay, calendar: calendar) {
+        if schedule.isDue(now: now, lastPrintedDay: settings.lastPrintedDay, calendar: calendar.calendar) {
             if let reason = Presence.notReady(slot: printer.activity) {
                 // Nobody to see it yet; look again shortly.
                 log.debug("Daily memory postponed: \(reason, privacy: .public)")
@@ -322,48 +322,7 @@ public final class MemoriesFeature: FeatureModule {
             }
             request(.daily)
         }
-        let next = schedule.nextCheck(after: now, lastPrintedDay: calendar.dayKey(for: now), calendar: calendar)
+        let next = schedule.nextCheck(after: now, lastPrintedDay: calendar.dayKey(for: now), calendar: calendar.calendar)
         scheduleCheck(after: min(15 * 60, max(5, next.timeIntervalSince(now) + 1)))
-    }
-
-    private func observeSystemEvents() {
-        let workspace = NSWorkspace.shared.notificationCenter
-        let distributed = DistributedNotificationCenter.default()
-        let events: [(NotificationCenter, Notification.Name)] = [
-            (workspace, NSWorkspace.didWakeNotification),
-            (workspace, NSWorkspace.screensDidWakeNotification),
-            (workspace, NSWorkspace.sessionDidBecomeActiveNotification),
-            (NotificationCenter.default, .NSCalendarDayChanged),
-            (NotificationCenter.default, .NSSystemClockDidChange),
-            (NotificationCenter.default, .NSSystemTimeZoneDidChange),
-            (distributed, Notification.Name("com.apple.screenIsUnlocked")),
-        ]
-        for (center, name) in events {
-            let token = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.scheduleCheck(after: 3) }
-            }
-            observers.append((center, token))
-        }
-    }
-}
-
-/// Whether someone is likely to see a print right now.
-enum Presence {
-    /// Why not, or `nil` if the coast is clear.
-    @MainActor
-    static func notReady(slot: SlotActivity) -> String? {
-        if CGDisplayIsAsleep(CGMainDisplayID()) != 0 { return "display asleep" }
-        // The booth, or a fax being written: the day's photos can wait until it is put away.
-        if slot.isPresenting { return "something is open under the slot" }
-        if let session = CGSessionCopyCurrentDictionary() as? [String: Any],
-           session["CGSSessionScreenIsLocked"] as? Bool == true {
-            return "screen locked"
-        }
-        let idle = min(
-            CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .mouseMoved),
-            CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
-        )
-        if idle > 120 { return "idle for \(Int(idle)) s" }
-        return nil
     }
 }

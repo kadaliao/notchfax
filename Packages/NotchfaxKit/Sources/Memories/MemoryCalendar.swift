@@ -1,4 +1,5 @@
 import Foundation
+import PrintKit
 
 /// Calendar arithmetic for "this day in earlier years".
 public struct MemoryCalendar: Sendable {
@@ -47,8 +48,7 @@ public struct MemoryCalendar: Sendable {
 
     /// A stable key for a calendar day, e.g. `2026-11-11`.
     public func dayKey(for date: Date) -> String {
-        let c = calendar.dateComponents([.year, .month, .day], from: date)
-        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+        DailySchedule.dayKey(for: date, calendar: calendar)
     }
 
     private func dayInterval(year: Int, month: Int, day: Int) -> DateInterval? {

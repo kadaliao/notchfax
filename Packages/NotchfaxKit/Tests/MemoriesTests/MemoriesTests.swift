@@ -156,41 +156,6 @@ private func photo(
     }
 }
 
-// MARK: - Daily schedule
-
-@Suite struct DailyScheduleTests {
-    let schedule = DailySchedule(hour: 9)
-
-    @Test func notDueBeforeTheHour() {
-        #expect(!schedule.isDue(now: date(2026, 11, 11, 8, 59), lastPrintedDay: nil, calendar: memoryCalendar))
-        #expect(schedule.nextCheck(after: date(2026, 11, 11, 8, 0), lastPrintedDay: nil, calendar: memoryCalendar) == date(2026, 11, 11, 9))
-    }
-
-    @Test func dueFromTheHourUntilMidnight() {
-        #expect(schedule.isDue(now: date(2026, 11, 11, 9, 0), lastPrintedDay: "2026-11-10", calendar: memoryCalendar))
-        // Mac woke up late in the evening: still today's print.
-        #expect(schedule.isDue(now: date(2026, 11, 11, 23, 50), lastPrintedDay: "2026-11-10", calendar: memoryCalendar))
-    }
-
-    @Test func neverTwiceOnTheSameDay() {
-        let now = date(2026, 11, 11, 14)
-        #expect(!schedule.isDue(now: now, lastPrintedDay: "2026-11-11", calendar: memoryCalendar))
-        #expect(schedule.nextCheck(after: now, lastPrintedDay: "2026-11-11", calendar: memoryCalendar) == date(2026, 11, 12, 9))
-    }
-
-    @Test func dayRolloverMakesItDueAgain() {
-        // Printed late yesterday; the Mac slept through midnight and wakes at 10:00.
-        #expect(schedule.isDue(now: date(2026, 11, 12, 10), lastPrintedDay: "2026-11-11", calendar: memoryCalendar))
-        // Woken just after midnight: wait for the hour.
-        #expect(!schedule.isDue(now: date(2026, 11, 12, 0, 5), lastPrintedDay: "2026-11-11", calendar: memoryCalendar))
-    }
-
-    @Test func hoursAreClamped() {
-        #expect(DailySchedule(hour: 30).hour == 23)
-        #expect(DailySchedule(hour: -2).hour == 0)
-    }
-}
-
 // MARK: - Print layout and export
 
 @Suite struct MemoryPrintTests {
