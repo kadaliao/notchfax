@@ -4,6 +4,8 @@
 
 ## [未发布]
 
+## [0.4.0] - 2026-11-25
+
 ### 新增
 
 - **今日 AI 花费**：每天到点从刘海里打一张小票，算这台 Mac 当天在 AI 模型上花了多少：每个模型的 token 和金额，各个编程助手的花费，再加合计。票头只写电脑名、机型和芯片。默认关着，在菜单里勾上「每天打印 AI 花费」、选个打印时间（默认 18:30）就行；到点时没人在电脑前，就等你回来再打。也能随时点「打印今日 AI 花费」打一张。用量取自本机 magpie 的记录，没装 magpie 的 Mac 上不出现这组菜单。
@@ -87,7 +89,8 @@
 - **传真**：匿名写给一位随机的陌生人。第一封只能是文字；对方回复后线路接通，才能互发图片。图片一律转成黑白点阵。
 - 纸可以抓着晃、横着撕、拖出去存成图片。没有刘海的屏幕会在顶部正中画一个出纸口。
 
-[未发布]: https://github.com/kadaliao/notchfax/compare/v0.3.1...HEAD
+[未发布]: https://github.com/kadaliao/notchfax/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/kadaliao/notchfax/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/kadaliao/notchfax/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/kadaliao/notchfax/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/kadaliao/notchfax/compare/v0.2.1...v0.2.2
