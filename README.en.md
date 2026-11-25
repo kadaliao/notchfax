@@ -63,6 +63,12 @@ Every line's conversation stays on your Mac. Choose 聊天记录… (History) un
 
 Print from the terminal with `notchfax print`, or have your coding agent print a cost receipt every time a session ends.
 
+### Today's AI spending
+
+Once a day, at a time you pick, a receipt of what this Mac spent on AI models since midnight: tokens and cost for each model, what each coding agent spent, and the total. The header names only the computer, its model and its chip.
+
+The numbers come from the usage history of [magpie](https://usemagpie.ai) on this Mac (calls through its gateway, plus what the agents' own session logs record), so the menu items only appear on a Mac with magpie installed. It is off by default: tick 每天打印 AI 花费 (Print AI spending daily) and pick a time under 打印时间 (Print time), 18:30 unless you change it. If nobody is at the Mac when the time comes, it waits for you to come back; after midnight that day's receipt is skipped. 打印今日 AI 花费 (Print today's AI spending) prints one any time without affecting the scheduled one.
+
 On screens without a notch, Notchfax draws a slot at the top centre. With Reduce Motion turned on, paper fades in and out instead of feeding.
 
 ## Install
@@ -165,6 +171,7 @@ It was developed on a Mac mini with no notch and no camera. These parts are veri
 - **A real notch**: position and width come from `NSScreen`'s safe area and auxiliary areas, checked only with a simulated notch.
 - **A real camera**: the photo booth has only run on simulated frames; real cameras, Continuity Camera and the permission prompt are untested.
 - **Automatic On this day prints**: printing by hand works; the daily schedule depends on time and presence detection and has not waited out a real day.
+- **Scheduled AI spending receipts**: printing by hand has run on real hardware; the schedule shares On this day's time and presence checks and has not waited out a real day either.
 - **Multiple displays, full-screen spaces, closing and reopening the lid**: handled in code, untested.
 - **Sound and haptics**: all sound is synthesized and its waveforms are unit-tested, but nobody has listened carefully; haptics need a Force Touch trackpad.
 - **Install Command Line Tool**: shows an administrator prompt; only the assembled command has been checked. The `notchfax` command and the Claude Code receipt have run for real; the Pi, OpenCode and DSH plugins are in daily use on the author's machine, and the cleaned-up versions here have been run by hand.

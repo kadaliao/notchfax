@@ -45,6 +45,7 @@ build/DerivedData/Build/Products/Debug/Notchfax.app/Contents/MacOS/Notchfax --de
 | `--welcome` | 再印一次首次启动的小票 |
 | `--quit-after <秒>` | 到时间自动退出 |
 | `--memories-sample` / `--memories-demo` | 那年今日改用程序生成的样张图库；`-demo` 还会在启动时打印 |
+| `--daily-spend-demo` | 启动时打一张今日 AI 花费 |
 | `--photobooth-simulated` / `--photobooth-demo` / `--photobooth-look <滤镜>` | 大头贴用模拟画面；启动即开拍；指定滤镜（`cartoon` `comic` `sketch` `pop` `dreamy` `instant` `warm` `cool` `mono` `color`） |
 | `--fax-server <网址>` | 这次运行使用的传真服务器 |
 | `--fax-profile <名字>` | 独立的传真身份和本地数据，用来在一台 Mac 上开两个实例互发 |
@@ -101,7 +102,7 @@ Packages/NotchfaxKit/
   Sources/Memories/       那年今日
   Sources/PhotoBooth/     大头贴
   Sources/FaxKit/         传真客户端
-  Sources/RemotePrint/    命令行打印：notchfax 命令、App 里的接收端、小票排版、AI 会话小票面板
+  Sources/RemotePrint/    命令行打印：notchfax 命令、App 里的接收端、小票排版、AI 会话小票面板、今日 AI 花费
   Sources/Updater/        自动更新：读发布页、下载校验、核对签名、替换并重启
 integrations/             各家编程助手的会话小票实现和共同做法
 server/                   传真中继服务器（Cloudflare Workers）

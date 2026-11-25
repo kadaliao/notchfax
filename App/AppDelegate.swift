@@ -18,6 +18,7 @@ import Updater
 /// - `--welcome`: print the first-launch slip again.
 /// - `--request-permissions`: ask for photo-library and camera access again if still undecided.
 /// - `--quit-after <seconds>`: quit on its own, for scripted runs.
+/// - `--daily-spend-demo`: print today's AI spending at launch.
 struct LaunchOptions {
     var demos: [String] = []
     var simulatesNotch = false
@@ -41,7 +42,7 @@ struct LaunchOptions {
             default: break
             }
         }
-        let scripted = ["--demo", "--fax-profile", "--memories-demo", "--photobooth-demo", "--fax-render-samples"]
+        let scripted = ["--demo", "--fax-profile", "--memories-demo", "--photobooth-demo", "--fax-render-samples", "--daily-spend-demo"]
         isScripted = arguments.contains { argument in scripted.contains(argument) || argument.hasPrefix("--fax-debug") }
     }
 }
@@ -52,6 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let printer = Printer()
     private var features: [any FeatureModule] = []
     private lazy var remotePrint = RemotePrintFeature(printer: printer)
+    private lazy var dailySpend = DailySpendFeature(printer: printer)
     private lazy var updater = UpdateFeature(printer: printer)
     private var statusItem: NSStatusItem?
     private lazy var debug = DebugSamples(printer: printer)
@@ -78,9 +80,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             PhotoBoothFeature(printer: printer),
             FaxFeature(printer: printer),
             remotePrint,
+            dailySpend,
             updater,
         ]
         updater.allowsAutomaticChecks = !launch.isScripted
+        dailySpend.allowsAutomaticPrints = !launch.isScripted
 
         installStatusItem()
         printer.start()

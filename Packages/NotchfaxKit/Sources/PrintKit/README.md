@@ -188,6 +188,21 @@ await printer.waitUntilIdle()
 `handle.cancel()` removes a waiting job or fades out a visible one;
 `printer.cancelAll()` does both for everything.
 
+### Printing once a day
+
+Daily prints (那年今日, 今日 AI 花费) share three pieces:
+
+- `DailySchedule(hour:minute:)`: `isDue(now:lastPrintedDay:calendar:)` is true from that
+  time until midnight on a day not yet printed; `nextCheck(after:…)` says when to look
+  again. `DailySchedule.dayKey(for:calendar:)` gives the `yyyy-MM-dd` to remember.
+- `Presence.notReady(slot:)`: why nobody would see a print now (display asleep, screen
+  locked, idle over two minutes, something open under the slot), or `nil`.
+- `ClockWatcher { … }`: calls back on wake, unlock, a new day, or a clock or time-zone
+  change, so the check does not rely on a timer surviving sleep.
+
+Check on launch, from `ClockWatcher`, and at least every quarter hour; when due but not
+`Presence`-ready, look again in 30 seconds; print as `.ambient`.
+
 ## Presenting a view under the slot
 
 ```swift
